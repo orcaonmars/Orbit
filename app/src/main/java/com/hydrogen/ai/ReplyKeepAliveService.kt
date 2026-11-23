@@ -63,17 +63,18 @@ class ReplyKeepAliveService : Service() {
         private const val CHANNEL_ID = "hydrogen_replies"
         private const val NOTIFICATION_ID = 4101
 
-        /** Starts or stops the keep-alive; failures (e.g. background start limits) are ignored. */
+        /**
+         * Starts or stops the keep-alive; failures (e.g. background start limits) are ignored.
+         *
+         * Uses startService, not startForegroundService. A send only begins while the app is on screen, so a plain
+         * start is allowed, and the service promotes itself in onStartCommand. startForegroundService instead
+         * makes Android kill the whole app if the reply ends (and stopService runs) before onStartCommand gets
+         * to call startForeground, which happened on a real phone with a fast reply.
+         */
         fun setActive(context: Context, active: Boolean) {
             val intent = Intent(context, ReplyKeepAliveService::class.java)
             runCatching {
-                if (!active) {
-                    context.stopService(intent)
-                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(intent)
-                } else {
-                    context.startService(intent)
-                }
+                if (active) context.startService(intent) else context.stopService(intent)
             }
         }
     }

@@ -65,6 +65,25 @@ import com.hydrogen.ai.model.RelayConfig
 import com.hydrogen.ai.model.VerificationState
 
 private const val GOOGLE_KEY_PAGE = "https://aistudio.google.com/apikey"
+
+/** Where each service hands out keys, so "Get a key" opens the right page. Services not listed show no link. */
+internal fun keyPageFor(preset: ProviderPreset): String? = when (preset) {
+    ProviderPreset.GOOGLE_GEMINI -> GOOGLE_KEY_PAGE
+    ProviderPreset.ANTHROPIC -> "https://console.anthropic.com/settings/keys"
+    ProviderPreset.OPENAI -> "https://platform.openai.com/api-keys"
+    ProviderPreset.OPENROUTER -> "https://openrouter.ai/keys"
+    ProviderPreset.GROQ -> "https://console.groq.com/keys"
+    ProviderPreset.MISTRAL -> "https://console.mistral.ai/api-keys"
+    ProviderPreset.DEEPSEEK -> "https://platform.deepseek.com/api_keys"
+    ProviderPreset.XAI -> "https://console.x.ai"
+    ProviderPreset.TOGETHER -> "https://api.together.ai/settings/api-keys"
+    ProviderPreset.FIREWORKS -> "https://fireworks.ai/account/api-keys"
+    ProviderPreset.CEREBRAS -> "https://cloud.cerebras.ai"
+    ProviderPreset.HUGGING_FACE -> "https://huggingface.co/settings/tokens"
+    ProviderPreset.NVIDIA -> "https://build.nvidia.com"
+    ProviderPreset.COHERE -> "https://dashboard.cohere.com/api-keys"
+    else -> null
+}
 private const val MAX_MODEL_CHOICES = 40
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,6 +157,8 @@ fun RelaySettingsSheet(
     var backupInput by remember { mutableStateOf("") }
     val uriHandler = LocalUriHandler.current
     val focusManager = LocalFocusManager.current
+    @Suppress("DEPRECATION")
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
 
     fun choose(next: ProviderPreset) {
         showCatalog = false
@@ -194,9 +215,9 @@ fun RelaySettingsSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text("Models & API keys", style = MaterialTheme.typography.titleLarge)
             Text(
@@ -307,7 +328,7 @@ fun RelaySettingsSheet(
             val keyStatus = when {
                 onWifi -> "Not sent over Wi-Fi. Use a server with no key, or connect over USB."
                 preset == savedPreset && hasToken -> "Saved ($maskedTokenLabel). Leave blank to keep it."
-                preset.keyRequired && !customOnPc -> "Required. Stored encrypted, never logged."
+                preset.keyRequired && !customOnPc -> "Got more than one? Paste them all, one per line. Extras become backups."
                 else -> "Optional for servers on this PC."
             }
             val pastedKeyCount = if (onWifi) 0 else ProviderPresets.splitPastedKeys(tokenInput).size
@@ -325,9 +346,21 @@ fun RelaySettingsSheet(
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = false,
                 maxLines = 3,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(16.dp),
+                trailingIcon = {
+                    TextButton(onClick = {
+                        clipboard.getText()?.text?.trim()?.takeIf { it.isNotEmpty() }?.let { tokenInput = it }
+                    }) { Text("Paste") }
+                },
                 modifier = Modifier.fillMaxWidth()
             )
+            keyPageFor(preset)?.let { page ->
+                OutlinedButton(
+                    onClick = { runCatching { uriHandler.openUri(page) } },
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Get a ${preset.title} key") }
+            }
             if (preset == savedPreset && hasToken) {
                 if (confirmDeleteCredential) {
                     Text(
@@ -348,11 +381,6 @@ fun RelaySettingsSheet(
                     TextButton(onClick = { confirmDeleteCredential = true }) {
                         Text("Remove saved API key")
                     }
-                }
-            }
-            if (preset == ProviderPreset.GOOGLE_GEMINI) {
-                TextButton(onClick = { runCatching { uriHandler.openUri(GOOGLE_KEY_PAGE) } }) {
-                    Text("Get a free Gemini API key at aistudio.google.com")
                 }
             }
             if (preset == savedPreset && hasToken && !onWifi) {

@@ -133,6 +133,31 @@ class BackupKeyRelayTest {
     }
 
     @Test
+    fun fiveGeminiKeysWalkPastEveryUsedUpKeyToTheOneThatWorks() = runTest(testDispatcher) {
+        val creds = storeWith("key-1", "key-2", "key-3", "key-4", "key-5")
+        val backend = ScriptedBackend(
+            mapOf(
+                "key-1" to ProviderErrorCategory.QUOTA_DAILY_429,
+                "key-2" to ProviderErrorCategory.QUOTA_RATE_TPM_RPM_429,
+                "key-3" to ProviderErrorCategory.QUOTA_DAILY_429,
+                "key-4" to null,
+                "key-5" to null
+            )
+        )
+        val vm = ChatViewModel(FakeConversationStore(), FakeConfigStore(google), creds, backend) { 5_000L }
+        advanceUntilIdle()
+        vm.updateDraft("Hi")
+        vm.sendMessage()
+        advanceUntilIdle()
+
+        assertEquals(listOf("key-1", "key-2", "key-3", "key-4"), backend.attempts.map { it.key })
+        assertEquals("Answer from key-4", vm.uiState.value.activeConversation?.messages?.lastOrNull()?.content)
+        // Next send starts on the key that worked; the used-up ones wait at the back.
+        assertEquals("key-4", creds.getToken(google))
+        assertEquals(listOf("key-5", "key-1", "key-2", "key-3"), creds.getBackupTokens(google))
+    }
+
+    @Test
     fun everyKeyAtItsLimitFailsOnceEachAndSaysSo() = runTest(testDispatcher) {
         val creds = storeWith("key-a", "key-b")
         val backend = ScriptedBackend(

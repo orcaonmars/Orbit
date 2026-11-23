@@ -28,8 +28,9 @@ class WhatsNewTest {
 
     @Test fun theTitleNamesThisVersion() {
         // Fails when versionName goes up without new notes, so an update never shows the last release's list.
-        val majorMinor = BuildConfig.VERSION_NAME.substringBefore('-').split('.').take(2).joinToString(".")
-        assertTrue(WhatsNew.TITLE, WhatsNew.TITLE.endsWith("Orbit $majorMinor"))
+        // Patch releases name their full number (0.2.1); a .0 release names just major.minor (0.2).
+        val version = BuildConfig.VERSION_NAME.substringBefore('-').removeSuffix(".0")
+        assertTrue(WhatsNew.TITLE, WhatsNew.TITLE.endsWith("Orbit $version"))
     }
 
     @Test fun copyFollowsTheHouseRules() {

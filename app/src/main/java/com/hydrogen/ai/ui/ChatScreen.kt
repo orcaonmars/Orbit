@@ -1900,9 +1900,9 @@ private fun DrawerConversationRow(
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                OrbitMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     if (!conversation.archived) {
-                        DropdownMenuItem(
+                        OrbitMenuItem(
                             text = { Text(if (conversation.pinned) "Unpin" else "Pin") },
                             leadingIcon = {
                                 Icon(
@@ -1916,7 +1916,7 @@ private fun DrawerConversationRow(
                             }
                         )
                     }
-                    DropdownMenuItem(
+                    OrbitMenuItem(
                         text = { Text("Rename") },
                         leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                         onClick = {
@@ -1925,7 +1925,7 @@ private fun DrawerConversationRow(
                         }
                     )
                     if (!conversation.archived) {
-                        DropdownMenuItem(
+                        OrbitMenuItem(
                             text = { Text("Move to project") },
                             leadingIcon = { Icon(Icons.Outlined.Folder, contentDescription = null) },
                             onClick = {
@@ -1934,7 +1934,7 @@ private fun DrawerConversationRow(
                             }
                         )
                     }
-                    DropdownMenuItem(
+                    OrbitMenuItem(
                         text = { Text(if (conversation.archived) "Unarchive" else "Archive") },
                         leadingIcon = {
                             Icon(
@@ -1947,7 +1947,7 @@ private fun DrawerConversationRow(
                             onArchive()
                         }
                     )
-                    DropdownMenuItem(
+                    OrbitMenuItem(
                         text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                         leadingIcon = {
                             Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
@@ -2146,10 +2146,10 @@ private fun ChatScaffold(
                         val shareContext = LocalContext.current
                         val conversation = state.activeConversation
                         val shareable = conversation?.takeIf { conv -> conv.messages.any { it.content.isNotBlank() } }
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        OrbitMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             // Empty chats have the switch in the top bar; this is the way in (and out) mid-chat.
                             if (!conversation?.messages.isNullOrEmpty()) {
-                                DropdownMenuItem(
+                                OrbitMenuItem(
                                     text = {
                                         Text(
                                             if (state.isTemporaryChat) TemporaryChatCopy.MENU_END
@@ -2164,7 +2164,7 @@ private fun ChatScaffold(
                                 )
                             }
                             if (conversation != null) {
-                                DropdownMenuItem(
+                                OrbitMenuItem(
                                     text = {
                                         Text(
                                             if (conversation.systemPrompt.isNotBlank()) "Chat instructions (on)"
@@ -2178,7 +2178,7 @@ private fun ChatScaffold(
                                     }
                                 )
                             }
-                            DropdownMenuItem(
+                            OrbitMenuItem(
                                 text = { Text(if (state.personal.isEmpty) "Personal" else "Personal (on)") },
                                 leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null) },
                                 onClick = {
@@ -2186,7 +2186,7 @@ private fun ChatScaffold(
                                     onOpenPersonal()
                                 }
                             )
-                            DropdownMenuItem(
+                            OrbitMenuItem(
                                 text = {
                                     Text(
                                         when {
@@ -2202,7 +2202,7 @@ private fun ChatScaffold(
                                     onOpenMemory()
                                 }
                             )
-                            DropdownMenuItem(
+                            OrbitMenuItem(
                                 text = { Text("Privacy & data") },
                                 leadingIcon = { Icon(Icons.Outlined.PrivacyTip, contentDescription = null) },
                                 onClick = {
@@ -2211,7 +2211,7 @@ private fun ChatScaffold(
                                 }
                             )
                             if (shareable != null) {
-                                DropdownMenuItem(
+                                OrbitMenuItem(
                                     text = { Text("Share chat") },
                                     leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
                                     onClick = {
@@ -2227,7 +2227,7 @@ private fun ChatScaffold(
                                     }
                                 )
                             }
-                            DropdownMenuItem(
+                            OrbitMenuItem(
                                 text = { Text(if (state.companion.isPaired) "PC Companion (paired)" else "PC Companion") },
                                 leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
                                 onClick = {
@@ -2235,7 +2235,7 @@ private fun ChatScaffold(
                                     onOpenCompanion()
                                 }
                             )
-                            DropdownMenuItem(
+                            OrbitMenuItem(
                                 text = { Text("Models & API keys") },
                                 leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
                                 onClick = {
@@ -2244,7 +2244,7 @@ private fun ChatScaffold(
                                 }
                             )
                             if (appearanceController != null) {
-                                DropdownMenuItem(
+                                OrbitMenuItem(
                                     text = { Text("Appearance") },
                                     leadingIcon = { Icon(Icons.Outlined.Palette, contentDescription = null) },
                                     onClick = {
@@ -2253,7 +2253,7 @@ private fun ChatScaffold(
                                     }
                                 )
                             }
-                            DropdownMenuItem(
+                            OrbitMenuItem(
                                 text = { Text("About Orbit") },
                                 leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
                                 onClick = {
@@ -3197,8 +3197,8 @@ private fun MessageItem(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                         )
                     }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
+                    OrbitMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        OrbitMenuItem(
                             text = { Text("Copy") },
                             leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
                             onClick = {
@@ -3209,7 +3209,7 @@ private fun MessageItem(
                             }
                         )
                         if (canEdit) {
-                            DropdownMenuItem(
+                            OrbitMenuItem(
                                 text = { Text("Edit and resend") },
                                 leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
                                 onClick = {
@@ -4026,25 +4026,25 @@ private fun ComposerBar(
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    DropdownMenu(expanded = showAttachMenu, onDismissRequest = { showAttachMenu = false }) {
-                        DropdownMenuItem(
+                    OrbitMenu(expanded = showAttachMenu, onDismissRequest = { showAttachMenu = false }) {
+                        OrbitMenuItem(
                             text = { Text("Photo") },
                             leadingIcon = { Icon(Icons.Outlined.Image, contentDescription = null) },
                             onClick = { showAttachMenu = false; onPickImages() }
                         )
                         if (onTakePhoto != null) {
-                            DropdownMenuItem(
+                            OrbitMenuItem(
                                 text = { Text("Camera") },
                                 leadingIcon = { Icon(Icons.Outlined.PhotoCamera, contentDescription = null) },
                                 onClick = { showAttachMenu = false; onTakePhoto() }
                             )
                         }
-                        DropdownMenuItem(
+                        OrbitMenuItem(
                             text = { Text("File (text, code, PDF)") },
                             leadingIcon = { Icon(Icons.Outlined.Description, contentDescription = null) },
                             onClick = { showAttachMenu = false; onPickFile() }
                         )
-                        DropdownMenuItem(
+                        OrbitMenuItem(
                             text = { Text("Saved prompts") },
                             leadingIcon = { Icon(Icons.Default.BookmarkBorder, contentDescription = null) },
                             onClick = { showAttachMenu = false; showPrompts = true }

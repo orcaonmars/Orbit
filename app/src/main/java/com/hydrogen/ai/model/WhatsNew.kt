@@ -9,20 +9,15 @@ package com.hydrogen.ai.model
 object WhatsNew {
     data class Item(val title: String, val body: String)
 
-    const val TITLE = "What's new in Orbit 0.2"
+    const val TITLE = "What's new in Orbit 0.2.1"
     const val SUBTITLE = "Your chats, notes and settings came with you."
     const val DONE = "Start chatting"
 
     val ITEMS: List<Item> = listOf(
-        Item("A new look", "Night, Paper and Midnight themes with five accents. Your accent moved to the closest new one."),
-        Item("Voice in the app", "Talk instead of typing, with no popup. Voice chat has its own calm screen."),
-        Item("Projects", "Keep chats, instructions and files together for one piece of work."),
-        Item("Archive", "Put chats away without deleting them. Search still finds them."),
-        Item("Edit and try again", "Change a message or ask again, then use the arrows to compare versions."),
-        Item("Thinking, folded away", "See how long a model thought. Tap to read its thinking."),
-        Item("Temporary chat", "A chat that is never saved and skips memory."),
-        Item("Personal", "Tell Orbit your name and how you like replies."),
-        Item("Word files", "Attach .docx files, like PDFs and text files.")
+        Item("More keys per service", "Paste up to ten keys, one per line. When one hits its limit, Orbit moves to the next."),
+        Item("Easier key setup", "A Paste button and a link to get a key for each service."),
+        Item("Softer menus", "Rounded menus with more room to tap."),
+        Item("Steadier replies", "Fixed a crash when a reply finished very fast.")
     )
 
     /**
