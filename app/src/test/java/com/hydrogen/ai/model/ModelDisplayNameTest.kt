@@ -1,0 +1,66 @@
+package com.hydrogen.ai.model
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class ModelDisplayNameTest {
+    @Test
+    fun drops_publisher_and_folder_prefixes() {
+        assertEquals("gemma-4-26b-a4b-it", ModelDisplayName.of("local-private/gemma-4-26b-a4b-it"))
+        assertEquals("gemini-2.5-flash", ModelDisplayName.of("models/gemini-2.5-flash"))
+        assertEquals("gemini-4-hydrogen", ModelDisplayName.of("gemini-4-hydrogen"))
+    }
+
+    @Test
+    fun drops_ollama_latest_tag_but_keeps_other_tags() {
+        assertEquals("llama3.2", ModelDisplayName.of("llama3.2:latest"))
+        assertEquals("qwen2.5:7b", ModelDisplayName.of("qwen2.5:7b"))
+    }
+
+    @Test
+    fun blank_and_odd_input_never_throw() {
+        assertEquals(ModelDisplayName.PLACEHOLDER, ModelDisplayName.of(""))
+        assertEquals(ModelDisplayName.PLACEHOLDER, ModelDisplayName.of("   "))
+        assertEquals("org", ModelDisplayName.of("org/"))
+        assertEquals(":latest", ModelDisplayName.of(":latest"))
+    }
+
+    @Test
+    fun friendly_names_read_like_product_names() {
+        assertEquals("Gemma 4 26B A4B", ModelDisplayName.friendly("local-private/gemma-4-26b-a4b-it"))
+        assertEquals("Gemini 2.5 Flash", ModelDisplayName.friendly("models/gemini-2.5-flash"))
+        assertEquals("Qwen2.5 7B", ModelDisplayName.friendly("qwen2.5:7b-instruct-q4_K_M"))
+        assertEquals("Llama3.2", ModelDisplayName.friendly("llama3.2:latest"))
+        assertEquals("Claude 3.5 Sonnet", ModelDisplayName.friendly("claude-3-5-sonnet-20241022"))
+        assertEquals("Claude Sonnet 4.5", ModelDisplayName.friendly("claude-sonnet-4-5"))
+        assertEquals("GPT-4o Mini", ModelDisplayName.friendly("gpt-4o-mini-2024-07-18"))
+        assertEquals("GPT-OSS 20B", ModelDisplayName.friendly("openai/gpt-oss-20b"))
+        assertEquals("DeepSeek R1", ModelDisplayName.friendly("deepseek-r1"))
+        assertEquals("o3 Mini", ModelDisplayName.friendly("o3-mini"))
+        assertEquals("Mistral 7B V0.2", ModelDisplayName.friendly("TheBloke/mistral-7b-instruct-v0.2-GGUF"))
+        assertEquals("Gemini 2.5 Pro", ModelDisplayName.friendly("gemini-2.5-pro-preview-05-06"))
+        assertEquals("Gemma 3n E2B", ModelDisplayName.friendly("google/gemma-3n-e2b-it"))
+        assertEquals("Llama 3.1 8B", ModelDisplayName.friendly("Meta-Llama-3.1-8B-Instruct-Q8_0.gguf".removeSuffix(".gguf").removePrefix("Meta-")))
+        assertEquals("Gemini 4 Hydrogen", ModelDisplayName.friendly("gemini-4-hydrogen"))
+    }
+
+    @Test
+    fun friendly_never_loses_the_name_entirely() {
+        assertEquals(ModelDisplayName.PLACEHOLDER, ModelDisplayName.friendly("  "))
+        assertEquals("instruct", ModelDisplayName.friendly("instruct"))
+        assertEquals("GPT", ModelDisplayName.friendly("gpt"))
+        val long = ModelDisplayName.friendly("x".repeat(500))
+        assertEquals(ModelDisplayName.MAX_CHARS, long.length)
+        assertTrue(long.endsWith("…"))
+        val longWords = ModelDisplayName.friendly(List(20) { "word" }.joinToString("-"))
+        assertTrue(longWords.length <= ModelDisplayName.MAX_CHARS)
+    }
+
+    @Test
+    fun very_long_names_are_capped() {
+        val shown = ModelDisplayName.of("x".repeat(500))
+        assertEquals(ModelDisplayName.MAX_CHARS, shown.length)
+        assertTrue(shown.endsWith("…"))
+    }
+}

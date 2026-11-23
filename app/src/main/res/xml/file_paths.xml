@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the temporary camera folder and PDFs the user opens or shares are shareable; chats and attachments are never
+     exposed. -->
+<paths>
+    <cache-path name="camera" path="camera/" />
+    <cache-path name="documents" path="documents/" />
+</paths>

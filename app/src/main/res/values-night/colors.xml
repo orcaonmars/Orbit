@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark pair for the "Ask Orbit" home-screen widget: Night surface, line and muted. -->
+    <color name="widget_surface">#FF1F1E1B</color>
+    <color name="widget_outline">#FF34312C</color>
+    <color name="widget_hint_text">#FFB3AA9C</color>
+</resources>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the Orbit icon. Actions must match model/QuickAction.kt; targetPackage is the release applicationId.
+     src/debug/res/xml/shortcuts.xml is the same file for the debug ID (both checked by QuickActionTest). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_new_chat"
+        android:shortcutId="new_chat"
+        android:shortcutLongLabel="@string/shortcut_new_chat_long"
+        android:shortcutShortLabel="@string/shortcut_new_chat_short">
+        <intent
+            android:action="com.hydrogen.ai.action.NEW_CHAT"
+            android:targetClass="com.hydrogen.ai.MainActivity"
+            android:targetPackage="io.github.orcaonmars.orbit" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_photo"
+        android:shortcutId="ask_photo"
+        android:shortcutLongLabel="@string/shortcut_photo_long"
+        android:shortcutShortLabel="@string/shortcut_photo_short">
+        <intent
+            android:action="com.hydrogen.ai.action.ASK_PHOTO"
+            android:targetClass="com.hydrogen.ai.MainActivity"
+            android:targetPackage="io.github.orcaonmars.orbit" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_voice"
+        android:shortcutId="voice"
+        android:shortcutLongLabel="@string/shortcut_voice_long"
+        android:shortcutShortLabel="@string/shortcut_voice_short">
+        <intent
+            android:action="com.hydrogen.ai.action.VOICE"
+            android:targetClass="com.hydrogen.ai.MainActivity"
+            android:targetPackage="io.github.orcaonmars.orbit" />
+    </shortcut>
+</shortcuts>

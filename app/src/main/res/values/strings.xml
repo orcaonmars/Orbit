@@ -1,0 +1,16 @@
+<resources>
+    <string name="app_name">Orbit</string>
+    <!-- Launcher long-press shortcuts (short labels fit about 10 characters). -->
+    <string name="shortcut_new_chat_short">New chat</string>
+    <string name="shortcut_new_chat_long">Start a new chat</string>
+    <string name="shortcut_photo_short">Ask photo</string>
+    <string name="shortcut_photo_long">Ask about a photo</string>
+    <string name="shortcut_voice_short">Speak</string>
+    <string name="shortcut_voice_long">Ask by voice</string>
+    <!-- Quick Settings tile. -->
+    <string name="tile_label">Ask Orbit</string>
+    <!-- Home-screen widget. -->
+    <string name="widget_hint">Ask Orbit…</string>
+    <string name="widget_open_chat">Start a new Orbit chat</string>
+    <string name="widget_description">A search bar for your AI: type, snap a photo or speak.</string>
+</resources>

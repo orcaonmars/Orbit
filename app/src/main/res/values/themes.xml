@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window shown before Compose draws (and the Android 12+ splash) matches the app's
+         background, so there is no white or cold flash on launch. -->
+    <style name="Theme.HydrogenAI" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/orbit_paper_background</item>
+    </style>
+</resources>

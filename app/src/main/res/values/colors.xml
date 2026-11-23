@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Window colors before Compose draws: the Night and Paper `bg` tokens in ui/theme/OrbitPalette.kt. -->
+    <color name="orbit_night_background">#FF141312</color>
+    <color name="orbit_paper_background">#FFF8F5EF</color>
+    <!-- "Ask Orbit" home-screen widget (values-night has the dark pair): Paper surface, line and muted.
+         Muted on surface is above 4.5:1 (ThemeContrastTest). -->
+    <color name="widget_surface">#FFFFFDF9</color>
+    <color name="widget_outline">#FFE0D9CC</color>
+    <color name="widget_hint_text">#FF5E574B</color>
+</resources>

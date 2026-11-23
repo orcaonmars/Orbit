@@ -1,0 +1,17 @@
+*.iml
+.gradle
+.kotlin
+build/
+local.properties
+.idea/
+.DS_Store
+/captures
+.externalNativeBuild
+.cxx
+
+# never commit builds or signing keys
+*.apk
+*.aab
+*.p12
+*.jks
+*.keystore
