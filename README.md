@@ -9,6 +9,12 @@ pick a model, and talk. That's most of it.
 It's an alpha. The core stuff is solid and well tested, but it hasn't been on many phones yet, so expect a few rough
 edges.
 
+## What is new in 0.3.1-alpha
+
+- A simpler provider picker and guided account, model, and connection setup.
+- Model discovery no longer switches the active chat or saves unfinished credentials.
+- Accurate daily-quota and temporary rate-limit messaging.
+
 ## What is new in 0.3.0-alpha
 
 - In-conversation search, searchable prompts, compact reply actions and playback controls.

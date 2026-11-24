@@ -1064,7 +1064,8 @@ class ChatViewModel(
         webSearchEnabled: Boolean,
         /** Null keeps the saved backup keys; a list replaces them. */
         backupTokens: List<String>? = null,
-        reasoningMode: com.hydrogen.ai.model.ReasoningMode = _uiState.value.relayConfig.reasoningMode
+        reasoningMode: com.hydrogen.ai.model.ReasoningMode = _uiState.value.relayConfig.reasoningMode,
+        discoveredReasoningModels: Set<String>? = null
     ) {
         val defaultModel = when (route) {
             ProviderRoute.GEMINI_HYDROGEN_RELAY -> HydrogenDefaults.PRIMARY_MODEL_ID
@@ -1092,7 +1093,11 @@ class ChatViewModel(
         )
         val scoped = if (draft.route == previous.route && draft.effectiveBaseUrl == previous.effectiveBaseUrl) draft
             else draft.copy(openRouterReasoningModels = emptySet())
-        val cleaned = normalizeReasoning(scoped)
+        val cleaned = normalizeReasoning(
+            if (discoveredReasoningModels != null && com.hydrogen.ai.model.ReasoningPolicy.isOpenRouter(scoped.effectiveBaseUrl))
+                scoped.copy(openRouterReasoningModels = discoveredReasoningModels)
+            else scoped
+        )
         val sameConnection = cleaned.route == previous.route && cleaned.effectiveBaseUrl == previous.effectiveBaseUrl && token == null
         if (!sameConnection) modelListGeneration++
         val compositeStore = credentialStore as? CompositeRelayCredentialStore
@@ -1167,6 +1172,26 @@ class ChatViewModel(
                 backupKeyLabels = emptyList(),
                 readiness = buildBaselineReadiness(config, false, computeWorkMode(it.companion))
             )
+        }
+    }
+
+    /** Discovery never changes the active chat connection or saves the pasted key. */
+    private fun providerDraft(route: ProviderRoute, url: String, model: String = ""): RelayConfig =
+        _uiState.value.relayConfig.copy(route = route, baseUrl = url, modelId = model)
+
+    fun savedDraftKeyLabel(route: ProviderRoute, url: String): String? =
+        credentialStore.getToken(providerDraft(route, url))?.takeIf { it.isNotBlank() }?.let(::maskSecretToken)
+
+    suspend fun browseDraftModels(route: ProviderRoute, url: String, model: String, pasted: String?): ModelListUiState {
+        val config = providerDraft(route, url, model)
+        val token = pasted?.let { ProviderPresets.splitPastedKeys(it).firstOrNull() }
+            ?: credentialStore.getToken(config)
+        return when (val result = backend.listModels(config, token)) {
+            is ModelListResult.Success -> ModelListUiState(
+                baseUrl = url, modelIds = result.modelIds,
+                message = "${result.modelIds.size} models found. Choose one, then connect.", reasoningModelIds = result.reasoningModelIds
+            )
+            is ModelListResult.Failure -> ModelListUiState(baseUrl = url, message = result.message)
         }
     }
 

@@ -1205,9 +1205,9 @@ fun ChatScreen(
             readiness = state.readiness,
             isCheckingHealth = state.isCheckingHealth,
             onDismiss = { showSettings = false; browseProvidersOnOpen = false },
-            onSave = { route, url, model, token, contextTokens, images, streaming, remember, search, effort ->
+            onSave = { route, url, model, token, contextTokens, images, streaming, remember, search, effort, catalog ->
                 viewModel.saveRelaySettings(route, url, model, token, contextTokens, images, streaming, remember, search,
-                    reasoningMode = effort)
+                    reasoningMode = effort, discoveredReasoningModels = catalog)
             },
             onCheckHealth = viewModel::checkRelayHealth,
             onDeleteCredential = viewModel::deleteActiveProviderCredential,
@@ -1215,8 +1215,8 @@ fun ChatScreen(
                 showSettings = false
                 showDiagnostics = true
             },
-            modelList = state.modelList,
-            onLoadModels = viewModel::loadModelList,
+            onBrowseModels = viewModel::browseDraftModels,
+            savedKeyFor = viewModel::savedDraftKeyLabel,
             initialPreset = settingsPreset,
             startWithCatalog = browseProvidersOnOpen,
             // The PC's Wi-Fi address, learned from the Companion pairing (or the address typed for it).

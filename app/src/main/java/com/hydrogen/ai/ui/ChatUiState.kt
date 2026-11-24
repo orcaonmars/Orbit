@@ -54,7 +54,8 @@ data class ModelListUiState(
     val isLoading: Boolean = false,
     val baseUrl: String = "",
     val modelIds: List<String> = emptyList(),
-    val message: String? = null
+    val message: String? = null,
+    val reasoningModelIds: Set<String>? = null
 )
 
 data class ParkedChatDraft(val text: String, val attachments: List<AttachmentManifestItem>)

@@ -9,15 +9,14 @@ package com.hydrogen.ai.model
 object WhatsNew {
     data class Item(val title: String, val body: String)
 
-    const val TITLE = "What's new in Orbit 0.3"
+    const val TITLE = "What's new in Orbit 0.3.1"
     const val SUBTITLE = "Your chats, notes and settings came with you."
     const val DONE = "Start chatting"
 
     val ITEMS: List<Item> = listOf(
-        Item("Cleaner chats", "Find text in conversations, navigate saved prompts, and use compact reply controls."),
-        Item("More model controls", "Browse providers, favorite models, and choose supported reasoning options."),
-        Item("Safer local data", "Improved backups, attachment limits, context reporting, and local writes."),
-        Item("Replies and projects", "Pause reading aloud, preview project files, and export code safely.")
+        Item("Simpler provider setup", "Choose a provider, paste your key, pick a model, and connect in three steps."),
+        Item("Accurate quota errors", "Orbit distinguishes confirmed daily limits from temporary and unknown limits."),
+        Item("Safer model discovery", "Find models without changing your active chat or saving an unfinished connection.")
     )
 
     /**

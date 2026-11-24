@@ -59,6 +59,42 @@ class ChatViewModelReadinessTest {
     }
 
     @Test
+    fun browsingDraftModelsKeepsActiveConnectionAndDoesNotSavePastedKey() = runTest(testDispatcher) {
+        val first = RelayConfig(route = ProviderRoute.GEMINI_HYDROGEN_RELAY, baseUrl = "https://first.example", modelId = "first")
+        val second = first.copy(baseUrl = "https://second.example", modelId = "second")
+        val configStore = FakeConfigStore(first)
+        val credentials = InMemoryRelayCredentialStore()
+        credentials.setToken(first, "first-key")
+        credentials.setToken(second, "saved-second")
+        var usedKey: String? = null
+        var usedConfig: RelayConfig? = null
+        val backend = object : ChatBackend {
+            override suspend fun checkHealth(config: RelayConfig, bearerToken: String?) = error("unused")
+            override suspend fun sendChat(request: ChatDispatchRequest, config: RelayConfig, bearerToken: String?,
+                onStreamDelta: suspend (StreamDelta) -> Unit): ChatDispatchResult = error("unused")
+            override suspend fun listModels(config: RelayConfig, bearerToken: String?): com.hydrogen.ai.network.ModelListResult {
+                usedKey = bearerToken
+                usedConfig = config
+                return com.hydrogen.ai.network.ModelListResult.Success(listOf("test-model"), setOf("test-model"))
+            }
+        }
+        val vm = ChatViewModel(FakeConversationStore(), configStore, credentials, backend) { 1000L }
+        advanceUntilIdle()
+        val result = vm.browseDraftModels(second.route, second.baseUrl, "", "new-test-key\nbackup-key")
+        assertEquals("new-test-key", usedKey)
+        assertEquals(second.baseUrl, usedConfig?.baseUrl)
+        assertEquals(listOf("test-model"), result.modelIds)
+        assertEquals(setOf("test-model"), result.reasoningModelIds)
+        assertEquals(first, configStore.loadConfig())
+        assertEquals(first, vm.uiState.value.relayConfig)
+        assertEquals("first-key", credentials.getToken(first))
+        assertEquals("saved-second", credentials.getToken(second))
+        vm.browseDraftModels(second.route, second.baseUrl, "", null)
+        assertEquals("saved-second", usedKey)
+        assertEquals(null, vm.savedDraftKeyLabel(second.route, "https://third.example"))
+    }
+
+    @Test
     fun returningToChatRestoresItsOwnServiceModelAndKey() = runTest(testDispatcher) {
         val initial = RelayConfig(route = ProviderRoute.GEMINI_HYDROGEN_RELAY, baseUrl = "https://first.example", modelId = "first-model")
         val store = FakeConversationStore()
