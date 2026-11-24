@@ -2,7 +2,9 @@ package com.hydrogen.ai.network
 
 import com.hydrogen.ai.model.ProviderErrorCategory
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RelayErrorClassifierTest {
@@ -69,5 +71,62 @@ class RelayErrorClassifierTest {
             route = com.hydrogen.ai.model.ProviderRoute.GOOGLE_AI_STUDIO_DIRECT
         )
         assertEquals(ProviderErrorCategory.QUOTA_RATE_TPM_RPM_429, error?.category)
+    }
+
+    @Test fun isTransientError_overloaded_returnsTrue() {
+        assertTrue(RelayErrorClassifier.isTransientError(ProviderErrorCategory.OVERLOADED))
+    }
+
+    @Test fun isTransientError_quotaRate429_returnsTrue() {
+        assertTrue(RelayErrorClassifier.isTransientError(ProviderErrorCategory.QUOTA_RATE_TPM_RPM_429))
+    }
+
+    @Test fun isTransientError_quotaDaily429_returnsFalse() {
+        assertFalse(RelayErrorClassifier.isTransientError(ProviderErrorCategory.QUOTA_DAILY_429))
+    }
+
+    @Test fun isTransientError_server5xx_returnsTrue() {
+        assertTrue(RelayErrorClassifier.isTransientError(ProviderErrorCategory.SERVER_5XX))
+    }
+
+    @Test fun isTransientError_contentFiltered_returnsFalse() {
+        assertFalse(RelayErrorClassifier.isTransientError(ProviderErrorCategory.CONTENT_FILTERED))
+    }
+
+    @Test fun isTransientError_badRequest_400_returnsFalse() {
+        assertFalse(RelayErrorClassifier.isTransientError(ProviderErrorCategory.BAD_REQUEST_400))
+    }
+
+    @Test fun isTransientError_unauthorized_401_returnsFalse() {
+        assertFalse(RelayErrorClassifier.isTransientError(ProviderErrorCategory.UNAUTHORIZED_RELAY_401))
+        assertFalse(RelayErrorClassifier.isTransientError(ProviderErrorCategory.UNAUTHORIZED_UPSTREAM_401))
+    }
+
+    @Test fun isTransientError_modelNotFound_returnsFalse() {
+        assertFalse(RelayErrorClassifier.isTransientError(ProviderErrorCategory.MODEL_NOT_FOUND))
+    }
+
+    @Test fun isTransientError_contextTooLong_returnsFalse() {
+        assertFalse(RelayErrorClassifier.isTransientError(ProviderErrorCategory.CONTEXT_TOO_LONG))
+    }
+
+    @Test fun isTransientError_requestTooLarge_returnsFalse() {
+        assertFalse(RelayErrorClassifier.isTransientError(ProviderErrorCategory.REQUEST_TOO_LARGE))
+    }
+
+    @Test fun isTransientError_unknownProtocol_returnsFalse() {
+        assertFalse(RelayErrorClassifier.isTransientError(ProviderErrorCategory.UNKNOWN_PROTOCOL))
+    }
+
+    @Test fun isTransientError_outOfCredits_returnsFalse() {
+        assertFalse(RelayErrorClassifier.isTransientError(ProviderErrorCategory.OUT_OF_CREDITS))
+    }
+
+    @Test fun isTransientError_regionUnavailable_returnsFalse() {
+        assertFalse(RelayErrorClassifier.isTransientError(ProviderErrorCategory.REGION_UNAVAILABLE))
+    }
+
+    @Test fun isTransientError_unrecognizedCategory_returnsFalse() {
+        assertFalse(RelayErrorClassifier.isTransientError(ProviderErrorCategory.UNCONFIGURED))
     }
 }

@@ -7,6 +7,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private data class SyntheticChat(val title: String, val messages: List<String>)
+
 class ChatSearchTest {
 
     private val e = ChatSearch.ELLIPSIS
@@ -133,5 +135,120 @@ class ChatSearchTest {
         val ranges = ChatSearch.snippetRanges(s, "ORBIT")
         assertEquals(1, ranges.size)
         assertEquals("Orbit", s.substring(ranges[0]))
+    }
+
+    @Test
+    fun matchIgnoresDiacriticsInEitherDirection() {
+        assertEquals(listOf(0..5), ChatSearch.matchRanges("Résumé writing", "resume"))
+        assertEquals(listOf(0..5), ChatSearch.matchRanges("resume writing", "résumé"))
+        assertEquals(listOf(0..3), ChatSearch.matchRanges("CAFÉ au lait", "cafe"))
+        assertEquals(listOf(0..5), ChatSearch.matchRanges("RÉSUMÉ writing", "resume"))
+        // Ranges still point into the original text after an accented character shifts nothing.
+        assertEquals(listOf(3..3), ChatSearch.matchRanges("aé b", "b"))
+        assertEquals(listOf(0..0, 8..8), ChatSearch.matchRanges("é orbit é", "é"))
+    }
+
+    @Test
+    fun decomposedAccentHighlightsTheWholeLetter() {
+        val text = "cafe\u0301 time"
+        assertEquals(10, text.length)
+        assertEquals(listOf(0..4), ChatSearch.matchRanges(text, "cafe"))
+        assertEquals(listOf(0..4), ChatSearch.matchRanges(text, "café"))
+    }
+
+    @Test
+    fun letterExpansionsMapBackToOriginalRangesWithoutOverlap() {
+        assertEquals(listOf(0..5), ChatSearch.matchRanges("Straße", "strasse"))
+        assertEquals(listOf(0..9), ChatSearch.matchRanges("smørrebrød", "smorrebrod"))
+        assertEquals(listOf(0..4), ChatSearch.matchRanges("Œuvre", "oeuvre"))
+        assertEquals(listOf(0..2), ChatSearch.matchRanges("ﬁle", "file"))
+        // "ß" folds to "ss", so a one-letter query can offer the same source character twice; never overlap.
+        assertEquals(listOf(0..0, 1..1), ChatSearch.matchRanges("ßs", "s"))
+    }
+
+    @Test
+    fun hasMatchIsCaseAndDiacriticInsensitiveAndRejectsBlanks() {
+        assertTrue(ChatSearch.hasMatch("Résumé", "RESUME"))
+        assertTrue(ChatSearch.hasMatch("resume", "Résumé"))
+        assertTrue(ChatSearch.hasMatch("cafe\u0301", "café"))
+        assertFalse(ChatSearch.hasMatch("Résumé", "orbit"))
+        assertFalse(ChatSearch.hasMatch("Résumé", "   "))
+        assertFalse(ChatSearch.hasMatch("", "orbit"))
+    }
+
+    @Test
+    fun nonSpacingMarksFoldButIndicVowelSignsStay() {
+        // The Devanagari vowel signs are spacing marks, part of the letter, so "की" must not match "कि".
+        assertTrue(ChatSearch.hasMatch("कि", "कि"))
+        assertFalse(ChatSearch.hasMatch("कि", "की"))
+    }
+
+    @Test
+    fun snippetFindsAccentedTextAndHighlightsIt() {
+        val md = "Le café est bon"
+        val s = ChatSearch.snippet(md, "cafe")!!
+        assertEquals(md, s)
+        val ranges = ChatSearch.snippetRanges(s, "CAFE")
+        assertEquals(listOf(3..6), ranges)
+        assertEquals("café", s.substring(ranges.single()))
+    }
+
+    @Test
+    fun snippetFindsDiacriticsInsideMarkdown() {
+        val s = ChatSearch.snippet("Use **résumé** tips", "resume")!!
+        assertEquals("Use résumé tips", s)
+        val range = ChatSearch.snippetRanges(s, "resume").single()
+        assertEquals("résumé", s.substring(range))
+    }
+
+    @Test
+    fun thousandSyntheticChatsSearchCorrectlyAndQuickly() {
+        val chats = (0 until 1_000).map { i ->
+            val title = if (i % 100 == 0) "Orbit review $i" else "Conversation $i"
+            val messages = (0 until 3).map { m ->
+                val key = i + m
+                when {
+                    key % 250 == 0 -> "The orbit path for $i/$m is stable."
+                    key % 97 == 0 -> "A résumé of the plan for $i/$m."
+                    else -> "Message $m in chat $i with ordinary words and details."
+                }
+            }
+            SyntheticChat(title, messages)
+        }
+
+        fun search(query: String): List<SyntheticChat> = chats.filter { chat ->
+            ChatSearch.hasMatch(chat.title, query) ||
+                chat.messages.any { ChatSearch.hasMatch(ChatSearch.plain(it), query) }
+        }
+
+        // Expected count is derived from the construction rules, not from ChatSearch.
+        val expected = (0 until 1_000).count { i ->
+            i % 100 == 0 || (0 until 3).any { m -> (i + m) % 250 == 0 }
+        }
+        assertEquals(expected, search("orbit").size)
+        assertTrue(search("resume").isNotEmpty())
+
+        repeat(2) { search("orbit") } // warm up JIT and regex caches
+        val startedAt = System.nanoTime()
+        val found = search("orbit")
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000.0
+        assertEquals(expected, found.size)
+        assertTrue("searching 1,000 chats took ${elapsedMs}ms", elapsedMs < 200.0)
+    }
+    @Test
+    fun fencedCodePreservesSearchableOperatorsAndIdentifiers() {
+        val fence = String(CharArray(3) { 96.toChar() })
+        val md = "$fence" + "kotlin\nval snake_case = a * b\n$fence"
+        assertEquals("val snake_case = a * b", ChatSearch.plain(md))
+        assertTrue(ChatSearch.hasMatch(ChatSearch.plain(md), "snake_case"))
+    }
+
+    @Test
+    fun snippetOfLongUnbrokenTextRemainsBounded() {
+        val md = "a".repeat(20000) + "TARGET" + "b".repeat(20000)
+        val snippet = ChatSearch.snippet(md, "TARGET")!!
+        assertTrue(snippet.length <= 140)
+        assertTrue(snippet.contains("TARGET"))
+        assertTrue(snippet.startsWith(e) && snippet.endsWith(e))
     }
 }

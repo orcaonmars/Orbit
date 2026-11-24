@@ -29,9 +29,9 @@ class ShareAnswerTest {
     }
 
     @Test
-    fun image_only_questions_are_skipped() {
+    fun image_only_question_does_not_leak_an_earlier_unrelated_prompt() {
         val chat = listOf(msg("1", MessageRole.USER, "Hi"), msg("2", MessageRole.USER, "  "), msg("3", MessageRole.ASSISTANT, "A cat"))
-        assertEquals("Q: Hi\n\nA: A cat", ShareAnswer.text(chat, 2))
+        assertEquals("A cat", ShareAnswer.text(chat, 2))
     }
 
     @Test
@@ -64,5 +64,17 @@ class ShareAnswerTest {
         val question = text.substringAfter("Q: ").substringBefore("\n\nA: ")
         assertEquals(ShareAnswer.MAX_QUESTION, question.length)
         assertTrue(question.endsWith("…"))
+    }
+
+    @Test fun sharingAnswerOmitsHiddenPcPayload() {
+        val answer = msg("a", MessageRole.ASSISTANT, "Visible\n\n```orbit-pc\nPRIVATE ACTION\n```")
+        assertEquals("Visible", ShareAnswer.text(listOf(answer), 0))
+    }
+
+    @Test fun truncationDoesNotSplitSupplementaryUnicodeCharacters() {
+        val question = "q".repeat(ShareAnswer.MAX_QUESTION - 2) + "\uD83D\uDE00" + "end"
+        val chat = listOf(msg("u", MessageRole.USER, question), msg("a", MessageRole.ASSISTANT, "Answer"))
+        val result = ShareAnswer.text(chat, 1)!!
+        assertTrue(result.none { Character.isSurrogate(it) })
     }
 }

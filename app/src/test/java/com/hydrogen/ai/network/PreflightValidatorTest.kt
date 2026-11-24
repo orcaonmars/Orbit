@@ -64,4 +64,25 @@ class PreflightValidatorTest {
         assertEquals(null, result.blockingError)
         assertTrue(result.includedImages.isEmpty())
     }
+
+    @Test fun unsupportedAttachmentIsBlockedEvenWhenImageCountIsBelowCap() {
+        val unsupported = image(1).copy(displayName = "archive.zip", mimeType = "application/zip")
+        val result = PreflightValidator.assess(
+            listOf(msg("Please inspect the attachment", listOf(unsupported))),
+            RelayConfig(maxImagesPerRequest = 8)
+        )
+        assertEquals(1, result.totalImageCount)
+        assertEquals(ProviderErrorCategory.PREFLIGHT_BLOCKED, result.blockingError?.category)
+        assertTrue(result.blockingError?.userMessage.orEmpty().contains("archive.zip"))
+    }
+
+    @Test fun oversizedImageIsBlockedEvenWhenImageCountIsBelowCap() {
+        val tooLarge = image(1).copy(sizeBytes = 1025L)
+        val result = PreflightValidator.assess(
+            listOf(msg("What is this?", listOf(tooLarge))),
+            RelayConfig(maxImagesPerRequest = 8, maxImageBytes = 1024L)
+        )
+        assertEquals(1, result.totalImageCount)
+        assertEquals(ProviderErrorCategory.PREFLIGHT_BLOCKED, result.blockingError?.category)
+    }
 }

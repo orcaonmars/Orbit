@@ -2,11 +2,27 @@ package com.hydrogen.ai.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.res.stringResource
+import com.hydrogen.ai.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.text.style.TextOverflow
+import com.hydrogen.ai.model.CodeExportSnapshot
+import com.hydrogen.ai.model.ReplyLayoutPolicy
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,10 +36,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
+
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
+
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -72,7 +88,7 @@ import com.hydrogen.ai.model.MarkdownParser
 import com.hydrogen.ai.model.MdBlock
 import com.hydrogen.ai.model.MdSpan
 import com.hydrogen.ai.model.TableCsv
-import com.hydrogen.ai.model.CodeFileName
+
 import com.hydrogen.ai.ui.theme.OrbitTheme
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -119,16 +135,17 @@ private fun MarkdownBlock(block: MdBlock) {
                 2 -> MaterialTheme.typography.titleMedium
                 else -> MaterialTheme.typography.titleSmall
             },
-            fontWeight = FontWeight.SemiBold
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.semantics { heading() }
         )
-        is MdBlock.ListItem -> Row(modifier = Modifier.padding(start = (block.indent * 16).dp)) {
+        is MdBlock.ListItem -> Row(modifier = Modifier.padding(start = OrbitTheme.space.m * block.indent)) {
             Text(
                 text = block.marker,
                 style = body,
                 color = orbit.muted,
-                modifier = Modifier.width(if (block.marker.length > 2) 28.dp else 18.dp)
+                modifier = Modifier.widthIn(min = OrbitTheme.space.xl).padding(end = OrbitTheme.space.s)
             )
-            Text(text = rememberAnnotated(block.spans), style = body)
+            Text(text = rememberAnnotated(block.spans), style = body, modifier = Modifier.weight(1f))
         }
         is MdBlock.Quote -> Row(modifier = Modifier.height(IntrinsicSize.Min)) {
             Box(
@@ -150,6 +167,7 @@ private fun MarkdownBlock(block: MdBlock) {
  * Horizontal rules only, a `surface-2` header row and 10 x 12 cell padding. Scrolls sideways inside the reply when
  * wider than it; each column fits its widest cell (measured, capped).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TableView(table: MdBlock.Table) {
     val measurer = rememberTextMeasurer()
@@ -170,34 +188,40 @@ private fun TableView(table: MdBlock.Table) {
     val tableWidth = widths.fold(0.dp) { a, b -> a + b }
     val context = LocalContext.current
     fun copy(label: String, text: String) {
-        context.getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(label, text))
-        // Android 13+ shows its own clipboard confirmation.
-        if (android.os.Build.VERSION.SDK_INT < 33) Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+        if (!copyOrbitText(context, label, text)) {
+            Toast.makeText(context, R.string.markdown_copy_failed, Toast.LENGTH_SHORT).show()
+        } else if (android.os.Build.VERSION.SDK_INT < 33) {
+            // Android 13+ shows its own clipboard confirmation.
+            Toast.makeText(context, R.string.markdown_copied, Toast.LENGTH_SHORT).show()
+        }
     }
+    val space = OrbitTheme.space
     Column {
-        Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-            TableRow(table.header, table.align, widths, header = true)
-            HorizontalDivider(thickness = 1.dp, color = orbit.line, modifier = Modifier.width(tableWidth))
-            for (row in table.rows) {
-                TableRow(row, table.align, widths, header = false)
-                HorizontalDivider(thickness = 1.dp, color = orbit.line, modifier = Modifier.width(tableWidth))
+        Surface(shape = OrbitTheme.shapes.m, border = BorderStroke(1.dp, orbit.line),
+            color = orbit.bg, contentColor = orbit.text, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                TableRow(table.header, table.align, widths, header = true)
+                for (row in table.rows) {
+                    HorizontalDivider(thickness = 1.dp, color = orbit.line, modifier = Modifier.width(tableWidth))
+                    TableRow(row, table.align, widths, header = false)
+                }
             }
         }
-        // Tab-separated text pastes into separate spreadsheet cells; CSV is for files and other apps.
-        Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+        // Wrap at large font sizes instead of squeezing or clipping the copy actions.
+        FlowRow(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
             TextButton(
                 onClick = { copy("Table", TableCsv.toTsv(table)) },
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                contentPadding = PaddingValues(horizontal = space.s)
             ) {
                 Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Copy table", style = MaterialTheme.typography.labelSmall)
+                Text(stringResource(R.string.reply_table_copy), style = MaterialTheme.typography.labelMedium)
             }
             TextButton(
                 onClick = { copy("CSV", TableCsv.toCsv(table)) },
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                contentPadding = PaddingValues(horizontal = space.s)
             ) {
-                Text("Copy CSV", style = MaterialTheme.typography.labelSmall)
+                Text(stringResource(R.string.reply_csv_copy), style = MaterialTheme.typography.labelMedium)
             }
         }
     }
@@ -273,6 +297,7 @@ private fun highlight(code: String, language: String, palette: CodePalette): Ann
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun CodeBlockView(block: MdBlock.CodeBlock) {
     val context = LocalContext.current
@@ -282,16 +307,39 @@ private fun CodeBlockView(block: MdBlock.CodeBlock) {
     val highlighted = remember(block.code, block.language, palette) {
         highlight(block.code, block.language, palette)
     }
-    // octet-stream so the file picker keeps the suggested extension (.py, .kt...) instead of appending .txt.
+    val scope = rememberCoroutineScope()
+    var pendingExport by remember { mutableStateOf<CodeExportSnapshot?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    val savedMessage = stringResource(R.string.reply_code_saved)
+    val failedMessage = stringResource(R.string.reply_code_save_failed)
+    // The picker can outlive a change of message version. Snapshot the exact bytes at the tap,
+    // and fail closed if the composable was destroyed instead of exporting the wrong reply.
     val saveLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val saved = runCatching {
-            context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(block.code.toByteArray(Charsets.UTF_8)) }
-                ?: error("no stream")
-        }.isSuccess
-        Toast.makeText(context, if (saved) "Saved" else "Couldn't save the file", Toast.LENGTH_SHORT).show()
+        val snapshot = pendingExport
+        pendingExport = null
+        if (uri != null) {
+            if (snapshot == null) {
+                Toast.makeText(context, failedMessage, Toast.LENGTH_SHORT).show()
+            } else {
+                saving = true
+                scope.launch {
+                    try {
+                        val saved = withContext(Dispatchers.IO) {
+                            runCatching {
+                                context.contentResolver.openOutputStream(uri, "wt")?.use {
+                                    it.write(snapshot.code.toByteArray(Charsets.UTF_8))
+                                } ?: error("no stream")
+                            }.isSuccess
+                        }
+                        Toast.makeText(context, if (saved) savedMessage else failedMessage, Toast.LENGTH_SHORT).show()
+                    } finally {
+                        saving = false
+                    }
+                }
+            }
+        }
     }
     // "Copy" reads "Copied" for 1.5 s after a tap (docs/ORBIT_DESIGN.md, "Code block").
     var copiedAt by remember { mutableLongStateOf(0L) }
@@ -305,50 +353,53 @@ private fun CodeBlockView(block: MdBlock.CodeBlock) {
     Surface(
         color = background,
         contentColor = orbit.text,
-        shape = RoundedCornerShape(14.dp),
+        shape = OrbitTheme.shapes.l,
         border = BorderStroke(1.dp, orbit.line),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column {
-            // A quiet header on the same `code` fill, split from the code by a hairline: the language in the faint
-            // code font on the left, Copy and Save on the right in the accent.
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 34.dp)
-                    .padding(start = 16.dp, end = 4.dp)
-            ) {
-                Text(
-                    text = block.language.ifBlank { "code" },
-                    style = MaterialTheme.typography.labelSmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = orbit.faint,
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(
-                    onClick = {
-                        context.getSystemService(ClipboardManager::class.java)
-                            ?.setPrimaryClip(ClipData.newPlainText("Orbit code", block.code))
-                        copiedAt = System.nanoTime().coerceAtLeast(1L)
-                    },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
-                ) {
-                    Icon(
-                        if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (copied) "Copied" else "Copy", style = MaterialTheme.typography.labelSmall)
+            val space = OrbitTheme.space
+            val codeLabel = block.language.ifBlank { stringResource(R.string.reply_code_label) }
+            val onCopy: () -> Unit = {
+                if (copyOrbitText(context, "Orbit code", block.code)) {
+                    copiedAt = System.nanoTime().coerceAtLeast(1L)
+                } else {
+                    copiedAt = 0L
+                    Toast.makeText(context, R.string.markdown_copy_failed, Toast.LENGTH_SHORT).show()
                 }
-                if (block.closed && block.code.isNotBlank()) {
-                    TextButton(
-                        onClick = { saveLauncher.launch(CodeFileName.suggest(block.language, block.code)) },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                    ) {
-                        Text("Save", style = MaterialTheme.typography.labelSmall)
+            }
+            val onSave: () -> Unit = {
+                val snapshot = CodeExportSnapshot.capture(block)
+                if (snapshot != null && !saving && pendingExport == null) {
+                    pendingExport = snapshot
+                    try {
+                        saveLauncher.launch(snapshot.fileName)
+                    } catch (_: android.content.ActivityNotFoundException) {
+                        pendingExport = null
+                        Toast.makeText(context, failedMessage, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+            BoxWithConstraints(Modifier.fillMaxWidth().padding(start = space.l, end = space.xs)) {
+                val stacked = ReplyLayoutPolicy.stackHeader(maxWidth.value, LocalDensity.current.fontScale)
+                val label: @Composable (Modifier) -> Unit = { modifier ->
+                    Text(codeLabel, style = MaterialTheme.typography.labelMedium,
+                        fontFamily = FontFamily.Monospace, color = orbit.muted,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
+                }
+                val actions: @Composable () -> Unit = {
+                    CodeHeaderActions(copied, block.closed && block.code.isNotBlank(),
+                        saveEnabled = !saving && pendingExport == null, onCopy = onCopy, onSave = onSave)
+                }
+                if (stacked) {
+                    Column(Modifier.fillMaxWidth().padding(top = space.s)) {
+                        label(Modifier.fillMaxWidth())
+                        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { actions() }
+                    }
+                } else {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        label(Modifier.weight(1f))
+                        actions()
                     }
                 }
             }
@@ -360,8 +411,32 @@ private fun CodeBlockView(block: MdBlock.CodeBlock) {
                 softWrap = false,
                 modifier = Modifier
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
+                    .padding(horizontal = OrbitTheme.space.l, vertical = OrbitTheme.space.m)
             )
+        }
+    }
+}
+
+@Composable
+private fun CodeHeaderActions(
+    copied: Boolean,
+    canSave: Boolean,
+    saveEnabled: Boolean,
+    onCopy: () -> Unit,
+    onSave: () -> Unit
+) {
+    val space = OrbitTheme.space
+    TextButton(onClick = onCopy, contentPadding = PaddingValues(horizontal = space.s),
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+        Icon(if (copied) OrbitIcons.Check else Icons.Default.ContentCopy,
+            contentDescription = null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(space.xs))
+        Text(stringResource(if (copied) R.string.reply_code_copied else R.string.reply_code_copy),
+            style = MaterialTheme.typography.labelMedium)
+    }
+    if (canSave) {
+        TextButton(onClick = onSave, enabled = saveEnabled, contentPadding = PaddingValues(horizontal = space.s)) {
+            Text(stringResource(R.string.reply_code_save), style = MaterialTheme.typography.labelMedium)
         }
     }
 }
@@ -376,6 +451,11 @@ private fun rememberAnnotated(spans: List<MdSpan>): AnnotatedString {
 /** Code text: 14 sp at 1.55 (docs/ORBIT_DESIGN.md, section 4). */
 private val CodeTextStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 22.sp)
 
+internal fun copyOrbitText(context: Context, label: String, text: String): Boolean =
+    runCatching {
+        val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return false
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+    }.isSuccess
 private const val COPIED_LABEL_MS = 1_500L
 
 private fun spansToAnnotated(spans: List<MdSpan>, codeBackground: Color, linkColor: Color): AnnotatedString =

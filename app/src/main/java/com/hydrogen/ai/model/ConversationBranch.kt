@@ -19,8 +19,9 @@ object ConversationBranch {
         nowMs: Long,
         newId: () -> String
     ): Conversation? {
+        if (source.temporary) return null
         val index = source.messages.indexOfFirst { it.id == messageId }
-        if (index < 0) return null
+        if (index < 0 || source.messages[index].comparison) return null
         // Only the versions on screen come along; the new chat starts with one version of every turn.
         val messages = MessageVersions.shownOnly(source.messages.take(index + 1))
             .filterNot { it.status in IN_FLIGHT }
@@ -36,7 +37,8 @@ object ConversationBranch {
             systemPrompt = source.systemPrompt,
             pinned = false,
             // A branch stays in the same project, and starts out in the list even if its source was archived.
-            projectId = source.projectId
+            projectId = source.projectId,
+            preferredConnection = source.preferredConnection
         )
     }
 
@@ -47,9 +49,12 @@ object ConversationBranch {
         val base = (match?.groupValues?.get(1) ?: trimmed).trim().ifEmpty { "New chat" }
         val suffix = when {
             match == null -> " (branch)"
-            else -> " (branch ${(match.groupValues[2].toIntOrNull() ?: 1) + 1})"
+            else -> " (branch ${match.groupValues[2].toBigIntegerOrNull()?.add(java.math.BigInteger.ONE)?.toString()?.takeIf { it.length <= 30 } ?: "2"})"
         }
         if (base.length + suffix.length <= MAX_TITLE) return base + suffix
-        return base.take(MAX_TITLE - suffix.length - 1).trimEnd() + "…" + suffix
+        val limit = (MAX_TITLE - suffix.length - 1).coerceAtLeast(0)
+        var cut = limit.coerceAtMost(base.length)
+        if (cut > 0 && cut < base.length && Character.isHighSurrogate(base[cut - 1])) cut--
+        return base.take(cut).trimEnd() + "\u2026" + suffix
     }
 }

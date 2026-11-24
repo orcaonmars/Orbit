@@ -28,16 +28,16 @@ object ContextWindowPolicy {
         systemPromptChars: Int = 0
     ): Plan {
         val safeSystemChars = systemPromptChars.coerceAtLeast(0)
+        val effectiveBudget = if (budgetChars <= 0) DEFAULT_BUDGET_CHARS else budgetChars
         if (items.isEmpty()) {
             return Plan(
                 keepFromIndex = 0,
                 droppedCount = 0,
                 usedChars = safeSystemChars,
-                overBudget = false
+                overBudget = safeSystemChars > effectiveBudget
             )
         }
 
-        val effectiveBudget = if (budgetChars <= 0) DEFAULT_BUDGET_CHARS else budgetChars
         val budgetLong = effectiveBudget.toLong()
         val lastIndex = items.lastIndex
 

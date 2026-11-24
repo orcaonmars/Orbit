@@ -53,7 +53,7 @@ class ChatListGroupingTest {
                 Group("Yesterday", listOf("yest-just-before-midnight", "yest-start")),
                 Group("Previous 7 days", listOf("p7-2d", "p7-7d")),
                 Group("Previous 30 days", listOf("p30-8d", "p30-30d")),
-                Group("October 2026", listOf("oct-31d"))
+                Group("October", listOf("oct-31d"))
             ),
             groups
         )
@@ -74,7 +74,7 @@ class ChatListGroupingTest {
         assertEquals(
             listOf(
                 Group("Today", listOf("today")),
-                Group("October 2026", listOf("old"))
+                Group("October", listOf("old"))
             ),
             groups
         )
@@ -97,10 +97,53 @@ class ChatListGroupingTest {
 
         assertEquals(
             listOf(
-                Group("January 2026", listOf("jan-2026")),
-                Group("December 2025", listOf("dec-2025-late", "dec-2025-early")),
-                Group("November 2025", listOf("nov-2025")),
-                Group("December 2024", listOf("dec-2024"))
+                Group("January", listOf("jan-2026")),
+                Group("2025", listOf("dec-2025-late", "dec-2025-early", "nov-2025")),
+                Group("2024", listOf("dec-2024"))
+            ),
+            groups
+        )
+    }
+
+    @Test
+    fun localZoneDecidesWhetherNewYearsChatIsMonthOrYearGroup() {
+        val utc = ZoneId.of("UTC")
+        val tokyo = ZoneId.of("Asia/Tokyo") // UTC+9
+        val losAngeles = ZoneId.of("America/Los_Angeles") // UTC-8 in late Dec
+
+        // 2025-12-31 15:30 UTC == 2026-01-01 00:30 Tokyo == 2025-12-31 07:30 Los Angeles.
+        val now = epochMs(2025, 12, 31, 15, 30, zone = utc)
+        val items = listOf("nov-2025" to epochMs(2025, 11, 20, 12, 0, zone = utc))
+
+        // Tokyo is already in 2026 locally, so a 42-day-old chat collapses into the 2025 year bucket.
+        assertEquals(
+            listOf(Group("2025", listOf("nov-2025"))),
+            ChatListGrouping.group(items, now, tokyo)
+        )
+
+        // Los Angeles is still in 2025 locally, so the same chat is a current-year month group.
+        assertEquals(
+            listOf(Group("November", listOf("nov-2025"))),
+            ChatListGrouping.group(items, now, losAngeles)
+        )
+    }
+
+    @Test
+    fun recentCrossYearChatsStayInPrevious30DaysBeforeYearBuckets() {
+        val zone = ZoneId.of("UTC")
+        val now = epochMs(2026, 1, 10, 12, 0, zone = zone)
+
+        val items = listOf(
+            "dec-31d" to epochMs(2025, 12, 10, 12, 0, zone = zone),
+            "dec-21d" to epochMs(2025, 12, 20, 12, 0, zone = zone)
+        )
+
+        val groups = ChatListGrouping.group(items, now, zone)
+
+        assertEquals(
+            listOf(
+                Group("Previous 30 days", listOf("dec-21d")),
+                Group("2025", listOf("dec-31d"))
             ),
             groups
         )
@@ -203,7 +246,7 @@ class ChatListGroupingTest {
         )
         assertEquals(
             listOf("m-first", "m-second"),
-            groups.first { it.title == "September 2026" }.conversationIds
+            groups.first { it.title == "September" }.conversationIds
         )
         assertEquals("min-long", groups.last().conversationIds.single())
     }

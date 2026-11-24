@@ -35,6 +35,30 @@ class ConnectionGroupingTest {
     }
 
     @Test
+    fun searchUsesNicknameFriendlyNameAndServerWithoutReordering() {
+        val first = relay(studio, "gemini-2.5-flash").copy(label = "Daily assistant")
+        val second = relay(other, "qwen2.5:7b-instruct")
+        val third = relay(studio, "gemini-2.5-pro")
+        val connections = listOf(first, second, third)
+        assertEquals(listOf(first, third), searchConnections(connections, "  GEMINI 2.5 "))
+        assertEquals(listOf(first), searchConnections(connections, "daily FLASH"))
+        assertEquals(listOf(second), searchConnections(connections, "192.168.1.20 qwen"))
+        assertEquals(connections, searchConnections(connections, "  "))
+        assertTrue(searchConnections(connections, "not-installed").isEmpty())
+    }
+
+    @Test
+    fun distinctPathsOnTheSameHostAreDifferentServices() {
+        val a = relay("https://example.com/first/v1", "a")
+        val b = relay("https://example.com/second/v1", "b")
+        val groups = groupByServer(listOf(a, b))
+        assertEquals(2, groups.size)
+        assertEquals(2, groups.map { it.first }.distinct().size)
+        assertEquals(listOf(a), groups[0].second)
+        assertEquals(listOf(b), groups[1].second)
+    }
+
+    @Test
     fun noModelsMeansNoGroups() {
         assertTrue(groupByServer(emptyList()).isEmpty())
     }

@@ -63,4 +63,42 @@ class ModelDisplayNameTest {
         assertEquals(ModelDisplayName.MAX_CHARS, shown.length)
         assertTrue(shown.endsWith("…"))
     }
+
+    @Test
+    fun short_names_drop_the_family_when_the_rest_still_names_the_model() {
+        assertEquals("2.5 Flash", ModelDisplayName.short("models/gemini-2.5-flash"))
+        assertEquals("2.5 Pro", ModelDisplayName.short("gemini-2.5-pro-preview-05-06"))
+        assertEquals("3.5 Sonnet", ModelDisplayName.short("claude-3-5-sonnet-20241022"))
+        assertEquals("Sonnet 4.5", ModelDisplayName.short("claude-sonnet-4-5"))
+        assertEquals("Opus 5.5", ModelDisplayName.short("claude-opus-5-5"))
+    }
+
+    @Test
+    fun short_names_keep_the_family_when_it_is_the_only_name_or_carries_the_model() {
+        // A leftover size or version alone would not say which model it is.
+        assertEquals("Gemma 4 26B A4B", ModelDisplayName.short("local-private/gemma-4-26b-a4b-it"))
+        assertEquals("Llama 3.1 8B", ModelDisplayName.short("Meta-Llama-3.1-8B-Instruct-Q8_0"))
+        assertEquals("Qwen2.5 7B", ModelDisplayName.short("qwen2.5:7b-instruct-q4_K_M"))
+        assertEquals("Mistral 7B V0.2", ModelDisplayName.short("TheBloke/mistral-7b-instruct-v0.2-GGUF"))
+        assertEquals("Gemma 3n E2B", ModelDisplayName.short("google/gemma-3n-e2b-it"))
+        // The first word is part of the name itself.
+        assertEquals("GPT-4o Mini", ModelDisplayName.short("gpt-4o-mini-2024-07-18"))
+        assertEquals("GPT-OSS 20B", ModelDisplayName.short("openai/gpt-oss-20b"))
+        assertEquals("o3 Mini", ModelDisplayName.short("o3-mini"))
+        assertEquals("DeepSeek R1", ModelDisplayName.short("deepseek-r1"))
+        assertEquals("Gemini 4 Hydrogen", ModelDisplayName.short("gemini-4-hydrogen"))
+    }
+
+    @Test
+    fun short_names_are_stable_and_never_blank() {
+        // The same model reached through a service prefix reads identically, so the chip does not flicker.
+        assertEquals(ModelDisplayName.short("gemini-2.5-flash"), ModelDisplayName.short("models/gemini-2.5-flash"))
+        assertEquals(ModelDisplayName.PLACEHOLDER, ModelDisplayName.short("  "))
+        assertEquals("instruct", ModelDisplayName.short("instruct"))
+        assertEquals("Llama3.2", ModelDisplayName.short("llama3.2:latest"))
+        assertEquals(
+            ModelDisplayName.MAX_CHARS,
+            ModelDisplayName.short(List(20) { "word" }.joinToString("-")).length
+        )
+    }
 }

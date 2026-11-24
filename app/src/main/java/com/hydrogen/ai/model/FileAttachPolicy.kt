@@ -92,6 +92,8 @@ object FileAttachPolicy {
         val name = displayName.replace('\n', ' ').take(120)
         return when (extensionOf(displayName)) {
             "doc" -> "'$name' is an older Word file. Save it as .docx in Word and attach it again."
+            "docx" -> "'$name' is a Word file. Attach it again."
+            "pdf" -> "'$name' is a PDF. Attach it again."
             else -> "'$name' is not supported. Attach a text or code file, a PDF, a Word file or an image."
         }
     }

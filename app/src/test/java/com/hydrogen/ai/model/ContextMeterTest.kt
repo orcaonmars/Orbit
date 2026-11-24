@@ -105,4 +105,20 @@ class ContextMeterTest {
         assertEquals("10k", ContextMeter.compact(9_990))
         assertEquals("100k", ContextMeter.compact(100_000))
     }
+    @Test
+    fun oversizedDraftIsDistinguishedFromHistoryTrimming() {
+        val budget = ContextWindowTrimmer.budgetFor(local)
+        val usage = ContextMeter.measure(listOf(msg(MessageRole.USER, 100)), "", local, draftChars = budget + 1)
+        assertEquals("OVER_LIMIT", usage.level.name)
+        assertTrue(usage.label.contains("too large", ignoreCase = true))
+        assertEquals(1, usage.droppedMessages)
+    }
+
+    @Test
+    fun oversizedSystemPromptAloneIsFlagged() {
+        val budget = ContextWindowTrimmer.budgetFor(local)
+        val usage = ContextMeter.measure(emptyList(), "x".repeat(budget + 1), local)
+        assertEquals("OVER_LIMIT", usage.level.name)
+        assertTrue(usage.label.contains("too large", ignoreCase = true))
+    }
 }

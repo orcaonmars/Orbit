@@ -9,9 +9,10 @@ import java.util.Locale
 data class ContextUsage(
     val usedChars: Long,
     val budgetChars: Int,
-    val droppedMessages: Int
+    val droppedMessages: Int,
+    val overLimit: Boolean = false
 ) {
-    enum class Level { HIDDEN, NOTICE, NEAR, TRIMMED }
+    enum class Level { HIDDEN, NOTICE, NEAR, TRIMMED, OVER_LIMIT }
 
     /** Share of the budget in use; may exceed 1 when older messages are being dropped. */
     val fraction: Float
@@ -22,6 +23,7 @@ data class ContextUsage(
 
     val level: Level
         get() = when {
+            overLimit -> Level.OVER_LIMIT
             droppedMessages > 0 -> Level.TRIMMED
             fraction >= NEAR_FRACTION -> Level.NEAR
             fraction >= SHOW_FRACTION -> Level.NOTICE
@@ -38,6 +40,7 @@ data class ContextUsage(
     val label: String
         get() = when (level) {
             Level.HIDDEN -> ""
+            Level.OVER_LIMIT -> "Current prompt or instructions may be too large for this model"
             Level.TRIMMED ->
                 if (droppedMessages == 1) "Long chat: the oldest message is no longer sent"
                 else "Long chat: the oldest $droppedMessages messages are no longer sent"
@@ -85,7 +88,7 @@ object ContextMeter {
         } else {
             emptyList()
         }
-        if (items.isEmpty()) return ContextUsage(reserved, budget, 0)
+        if (items.isEmpty()) return ContextUsage(reserved, budget, 0, overLimit = reserved > budget)
         val total = reserved + items.sumOf {
             it.chars.toLong() + it.imageCount.toLong() * ContextWindowPolicy.IMAGE_COST_CHARS
         }
@@ -94,7 +97,7 @@ object ContextMeter {
             budgetChars = budget,
             systemPromptChars = reserved.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         )
-        return ContextUsage(total, budget, plan.droppedCount)
+        return ContextUsage(total, budget, plan.droppedCount, overLimit = plan.overBudget)
     }
 
     /** 950 -> "950", 6000 -> "6k", 4200 -> "4.2k", 100000 -> "100k". */

@@ -1,5 +1,7 @@
 package com.hydrogen.ai.model
 
+import com.hydrogen.ai.companion.AskPcProposals
+
 /**
  * Pure, Android-free conversion of a conversation into shareable Markdown.
  *
@@ -9,15 +11,16 @@ package com.hydrogen.ai.model
 object ConversationMarkdownExporter {
 
     fun export(conversation: Conversation): String = buildString {
-        val title = singleLine(conversation.title).ifBlank { "Orbit chat" }
+        val title = headingSafe(conversation.title).ifBlank { "Orbit chat" }
         append("# ").append(title).append('\n')
         append('\n').append("_Exported from Orbit · model: ")
-            .append(singleLine(conversation.modelId)).append("_\n")
+            .append(headingSafe(conversation.modelId)).append("_\n")
 
         conversation.messages.forEach { message ->
-            if (message.status == MessageStatus.STAGED) return@forEach
-            val body = message.content.trim()
-            val names = message.attachments.map { singleLine(it.displayName).ifBlank { "attachment" } }
+            if (!isVisible(message)) return@forEach
+            val body = messageText(message)
+            val names = message.attachments.orEmpty()
+                .map { escapeInline(singleLine(it.displayName)).ifBlank { "attachment" } }
             if (body.isEmpty() && names.isEmpty()) return@forEach
 
             append('\n').append("## ").append(heading(message)).append("\n\n")
@@ -41,8 +44,8 @@ object ConversationMarkdownExporter {
     fun exportAll(conversations: List<Conversation>): String {
         val parts = conversations
             .filter { conversation ->
-                conversation.messages.any {
-                    it.status != MessageStatus.STAGED && (it.content.isNotBlank() || it.attachments.isNotEmpty())
+                !conversation.temporary && conversation.messages.any {
+                    isVisible(it) && (messageText(it).isNotBlank() || it.attachments.isNotEmpty())
                 }
             }
             .sortedByDescending { it.updatedAtEpochMs }
@@ -51,13 +54,28 @@ object ConversationMarkdownExporter {
     }
 
     /** Text placed on the clipboard when a single message is copied (document tags left out). */
-    fun messageText(message: ChatMessage): String = PdfMarkdown.plainText(message.content.trim())
+    fun messageText(message: ChatMessage): String = when (message.role) {
+        MessageRole.SYSTEM -> ""
+        MessageRole.USER -> message.content.trim()
+        MessageRole.ASSISTANT -> PdfMarkdown.plainText(AskPcProposals.displayText(message.content).trim()).trim()
+    }
+
+    private fun isVisible(message: ChatMessage): Boolean =
+        message.role != MessageRole.SYSTEM && message.status != MessageStatus.STAGED
 
     private fun heading(message: ChatMessage): String = when (message.role) {
         MessageRole.USER -> "You"
-        MessageRole.ASSISTANT -> "Assistant (${singleLine(message.modelId)})"
+        MessageRole.ASSISTANT -> "Assistant (${headingSafe(message.modelId)})"
         MessageRole.SYSTEM -> "System"
     }
+
+    /** Collapses newlines and strips leading `#` runs so the value cannot inject a Markdown heading. */
+    private fun headingSafe(value: String): String =
+        escapeInline(singleLine(value).replace(Regex("^#+\\s*"), ""))
+
+    /** Backslash-escapes Markdown inline punctuation that could break emphasis or link syntax. */
+    private fun escapeInline(value: String): String =
+        value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace(Regex("[\\\\`*_\\[\\]{}()#+!|]")) { "\\${it.value}" }
 
     private fun singleLine(value: String): String =
         value.replace(Regex("[\\r\\n]+"), " ").trim()

@@ -54,6 +54,12 @@ object PromptLibrary {
 
     fun remove(prompts: List<SavedPrompt>, id: String): List<SavedPrompt> = prompts.filterNot { it.id == id }
 
+    fun search(prompts: List<SavedPrompt>, query: String): List<SavedPrompt> =
+        if (query.isBlank()) prompts else prompts.filter { SettingsSearch.matches(query, it.title, it.text) }
+
+    /** A compact body preview; the original prompt is never modified. */
+    fun preview(prompt: SavedPrompt): String = prompt.text.replace(Regex("\\s+"), " ").trim().take(180)
+
     /** Inserts a prompt into the composer draft without discarding what the user already typed. */
     fun insertIntoDraft(draft: String, promptText: String): String =
         if (draft.isBlank()) promptText else draft.trimEnd() + "\n\n" + promptText

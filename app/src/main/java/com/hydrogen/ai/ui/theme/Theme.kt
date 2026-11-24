@@ -123,6 +123,10 @@ fun HydrogenAITheme(
     val scheme = remember(palette) { orbitColorScheme(palette) }
     CompositionLocalProvider(
         LocalOrbitPalette provides palette,
+        LocalOrbitSpacing provides OrbitSpacing(),
+        LocalOrbitShapeTokens provides OrbitShapeTokens(),
+        LocalOrbitMotionTokens provides OrbitMotionTokens(),
+        LocalOrbitTypography provides OrbitTypography,
         LocalAppearanceController provides controller
     ) {
         MaterialTheme(

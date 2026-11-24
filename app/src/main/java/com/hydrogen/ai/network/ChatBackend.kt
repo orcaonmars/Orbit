@@ -14,7 +14,10 @@ data class ChatDispatchRequest(
     val messages: List<ChatMessage>,
     val attachments: List<AttachmentManifestItem>,
     val omittedAttachmentIds: Set<String> = emptySet(),
-    val stream: Boolean = true
+    val stream: Boolean = true,
+    internal val reasoningEffort: String? = null,
+    internal val openRouterReasoningEffort: String? = null,
+    internal val completionTokenBudget: Int? = null
 )
 
 data class StreamDelta(
@@ -47,7 +50,7 @@ sealed interface ChatDispatchResult {
 }
 
 sealed interface ModelListResult {
-    data class Success(val modelIds: List<String>) : ModelListResult
+    data class Success(val modelIds: List<String>, val reasoningModelIds: Set<String>? = null) : ModelListResult
     data class Failure(val message: String) : ModelListResult
 }
 

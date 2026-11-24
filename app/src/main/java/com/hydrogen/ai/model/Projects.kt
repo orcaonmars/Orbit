@@ -34,6 +34,14 @@ data class ProjectsFile(
     val projects: List<Project> = emptyList()
 )
 
+/** The saved text selected for a project's next system message. */
+data class ProjectFileContext(val file: ProjectFile, val includedText: String) {
+    val storedChars: Int get() = file.text.trimEnd().length
+    val sentChars: Int get() = includedText.length
+    val omitted: Boolean get() = sentChars == 0
+    val partial: Boolean get() = sentChars in 1 until storedChars
+}
+
 object Projects {
     const val VERSION = 1
     const val MAX_NAME = 60
@@ -82,6 +90,16 @@ object Projects {
     /** Characters of file text a project holds, for the "how full" meter. */
     fun filesChars(project: Project): Int = project.files.sumOf { it.text.length }
 
+    /** Shared by the local preview and actual request construction. Does not mutate saved text. */
+    fun fileContext(project: Project): List<ProjectFileContext> {
+        var left = FILES_BUDGET_CHARS
+        return clean(project).files.map { file ->
+            val shown = file.text.trimEnd().take(left).trimEnd()
+            left -= shown.length
+            ProjectFileContext(file, shown)
+        }
+    }
+
     /** A new file for [project], or null when it already has [MAX_FILES] files or the text is blank. */
     fun withFile(project: Project, file: ProjectFile, nowEpochMs: Long): Project? {
         if (project.files.size >= MAX_FILES || file.text.isBlank()) return null
@@ -102,20 +120,17 @@ object Projects {
             parts += "Project instructions:\n${p.instructions}"
         }
         if (p.files.isNotEmpty()) {
-            var left = FILES_BUDGET_CHARS
             val included = mutableListOf<String>()
             val skipped = mutableListOf<String>()
-            for (file in p.files) {
-                if (left <= 0) {
+            for (entry in fileContext(p)) {
+                val file = entry.file
+                if (entry.omitted) {
                     skipped += file.name
                     continue
                 }
-                val body = file.text.trimEnd()
-                val fits = body.length <= left
-                val shown = if (fits) body else body.take(left).trimEnd()
-                left -= shown.length
+                val shown = entry.includedText
                 val note = when {
-                    !fits -> "\n(The rest of this file did not fit and was left out.)"
+                    entry.partial -> "\n(The rest of this file did not fit and was left out.)"
                     file.truncated -> "\n(Only the beginning of this file was saved.)"
                     else -> ""
                 }

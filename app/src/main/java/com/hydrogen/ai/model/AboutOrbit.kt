@@ -9,7 +9,8 @@ object AboutOrbit {
     const val NAME = "Orbit"
     const val TAGLINE = "Open-source AI chat for your phone and your PC."
 
-    fun versionLine(versionName: String): String = "Version $versionName"
+    fun versionLine(versionName: String): String =
+        if (versionName.isBlank()) "Version unknown" else "Version $versionName"
 
     /** What Orbit promises. Each line must stay true: PrivacySummary has the detail behind it. */
     val PROMISES: List<String> = listOf(

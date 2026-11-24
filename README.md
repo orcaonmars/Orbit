@@ -9,6 +9,15 @@ pick a model, and talk. That's most of it.
 It's an alpha. The core stuff is solid and well tested, but it hasn't been on many phones yet, so expect a few rough
 edges.
 
+## What is new in 0.3.0-alpha
+
+- In-conversation search, searchable prompts, compact reply actions and playback controls.
+- Clean APIs preset, model favorites, supported reasoning options and retry isolation.
+- Safer local storage, backups, attachments and project imports.
+- Improved context accounting and code export snapshots.
+
+The release candidate passed 1,020 unit tests (two skipped), the optimized Android build and an emulator launch smoke test. It is still an alpha; not all devices or provider services have been tested.
+
 ## What it does
 
 - **Lots of providers.** Anthropic, OpenAI, Google Gemini, OpenRouter, Groq, Mistral, DeepSeek, xAI, Together,

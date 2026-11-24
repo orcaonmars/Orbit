@@ -154,9 +154,10 @@ class HttpAnthropicMessagesBackend(
                 )
             )
         }
-        val built = buildPayload(request, model, safe = false)
+        val effort = com.hydrogen.ai.model.ReasoningPolicy.anthropicEffort(baseUrl, model, config.reasoningMode)
+        val built = buildPayload(request, model, safe = false, effort = effort)
         built.error?.let { return@withContext ChatDispatchResult.Failure(it) }
-        val first = dispatchOnce(built, model, request.stream, baseUrl, key, service, onStreamDelta)
+        val first = dispatchOnce(built, model, request.stream, baseUrl, key, service, onStreamDelta, allowRetry = effort == null)
         if (first is Attempt.RetrySafer) {
             // The service turned down thinking or the reply length (an older model, or another service using the
             // format). Ask once more without them rather than showing an error the person can't fix.
@@ -225,7 +226,7 @@ class HttpAnthropicMessagesBackend(
     private fun shouldRetrySafer(code: Int, body: String, built: PayloadBuildResult): Boolean {
         if (code != 400 || !(built.sentThinking || built.maxTokens > SAFE_MAX_TOKENS)) return false
         val lower = body.lowercase()
-        return lower.contains("thinking") || lower.contains("max_tokens") || lower.contains("display")
+        return lower.contains("thinking") || lower.contains("max_tokens") || lower.contains("display") || lower.contains("output_config") || lower.contains("effort")
     }
 
     internal data class PayloadBuildResult(
@@ -241,7 +242,7 @@ class HttpAnthropicMessagesBackend(
      * turn those down. Same-role turns are merged and the chat starts and ends with the person's turn, as the format
      * requires; earlier replies go back as plain text (no thinking blocks, which belong to one service only).
      */
-    internal suspend fun buildPayload(request: ChatDispatchRequest, model: String, safe: Boolean): PayloadBuildResult {
+    internal suspend fun buildPayload(request: ChatDispatchRequest, model: String, safe: Boolean, effort: String? = null): PayloadBuildResult {
         var usedVision = false
         val systemTexts = mutableListOf<String>()
         val turns = mutableListOf<Pair<String, MutableList<JsonObject>>>()
@@ -308,7 +309,12 @@ class HttpAnthropicMessagesBackend(
             )
         }
         val thinking = !safe && supportsAdaptiveThinking(model)
-        val maxTokens = if (safe) SAFE_MAX_TOKENS else maxTokensFor(model)
+        val maxTokens = when {
+            safe -> SAFE_MAX_TOKENS
+            thinking && effort == "max" -> 64000
+            thinking && effort == "xhigh" -> 32000
+            else -> maxTokensFor(model)
+        }
         val body = buildJsonObject {
             put("model", model)
             put("max_tokens", maxTokens)
@@ -326,6 +332,7 @@ class HttpAnthropicMessagesBackend(
                     put("type", "adaptive")
                     put("display", "summarized")
                 })
+                if (effort != null) put("output_config", buildJsonObject { put("effort", effort) })
             }
         }
         return PayloadBuildResult(body = body, usedVision = usedVision, sentThinking = thinking, maxTokens = maxTokens)
@@ -422,7 +429,7 @@ class HttpAnthropicMessagesBackend(
         const val API_VERSION = "2023-06-01"
         const val DEFAULT_MAX_TOKENS = 16_000
         const val SAFE_MAX_TOKENS = 4_096
-        private const val MAX_LISTED_MODELS = 200
+        private const val MAX_LISTED_MODELS = 2_000
         private val json = Json { ignoreUnknownKeys = true }
         private val CLAUDE_VERSION = Regex("""^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?(?:-|$)""")
         private val SUPPORTED_IMAGE_TYPES = setOf("image/jpeg", "image/png", "image/gif", "image/webp")

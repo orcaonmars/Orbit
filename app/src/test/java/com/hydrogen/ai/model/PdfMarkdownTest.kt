@@ -93,4 +93,37 @@ class PdfMarkdownTest {
         assertTrue(OrbitInstructions.DEFAULT_STYLE.contains("<pdf title="))
         assertTrue(PdfMarkdown.hasDocument("<pdf title=\"Short title\">x</pdf>"))
     }
+
+    @Test fun literalPdfTagsInCodeAreNotDocumentCards() {
+        val content = "Use `<pdf>example</pdf>` or:\n\n```html\n<pdf>literal</pdf>\n```"
+        assertFalse(PdfMarkdown.hasDocument(content))
+        assertEquals(listOf(ReplyPart.Text(content)), PdfMarkdown.splitReply(content))
+        assertEquals(content, PdfMarkdown.plainText(content))
+    }
+
+    @Test fun realDocumentCanContainLiteralClosingTagsInFencedCode() {
+        val content = "<pdf title='Example'>\n# HTML\n\n```html\n</pdf>\n```\n\nEnd.\n</pdf>"
+        val doc = PdfMarkdown.splitReply(content).single() as ReplyPart.Document
+        assertTrue(doc.complete)
+        assertTrue(doc.markdown.contains("```html\n</pdf>\n```"))
+        assertTrue(doc.markdown.endsWith("End."))
+        assertTrue(PdfMarkdown.plainText(content).contains("```html\n</pdf>\n```"))
+    }
+
+    @Test fun escapedTagsAndUnclosedFencesRemainLiteral() {
+        val escaped = "\\<pdf>example</pdf>"
+        assertFalse(PdfMarkdown.hasDocument(escaped))
+        val fenced = "~~~~text\n<pdf>example"
+        assertFalse(PdfMarkdown.hasDocument(fenced))
+        assertEquals(fenced, PdfMarkdown.plainText(fenced))
+    }
+
+    @Test fun realDocumentBesideInlineExampleStillParses() {
+        val content = "Example `<pdf>`.\n\n<pdf>Real document</pdf>"
+        val parts = PdfMarkdown.splitReply(content)
+        assertEquals(2, parts.size)
+        assertEquals(ReplyPart.Text("Example `<pdf>`."), parts.first())
+        assertEquals("Real document", (parts.last() as ReplyPart.Document).markdown)
+        assertEquals("Example `<pdf>`.\n\nReal document", PdfMarkdown.plainText(content))
+    }
 }

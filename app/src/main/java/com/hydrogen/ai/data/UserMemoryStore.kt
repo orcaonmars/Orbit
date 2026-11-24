@@ -36,17 +36,13 @@ class FileUserMemoryStore(private val dir: File) : UserMemoryStore {
     }
 
     override suspend fun save(state: UserMemoryState) = withContext(Dispatchers.IO) {
-        dir.mkdirs()
-        val tmp = File(dir, "orbit_memory.json.tmp")
-        tmp.writeText(UserMemory.encode(state.items))
-        if (!tmp.renameTo(itemsFile)) {
-            itemsFile.delete()
-            if (!tmp.renameTo(itemsFile)) {
-                tmp.copyTo(itemsFile, overwrite = true)
-                tmp.delete()
-            }
-        }
-        if (state.enabled) offMarker.delete() else offMarker.writeText("off")
+        // Persist opt-out before touching the items. A failed write must not re-enable memory.
+        if (!state.enabled) SafeFileReplace.writeText(offMarker, "off")
+        if (state.items.isEmpty()) SafeFileReplace.deleteSnapshot(itemsFile)
+        else SafeFileReplace.writeText(itemsFile, UserMemory.encode(state.items))
+        // Only enable memory after the requested snapshot was saved successfully.
+        if (state.enabled) SafeFileReplace.deleteSnapshot(offMarker)
+
         Unit
     }
 }

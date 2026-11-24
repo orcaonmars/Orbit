@@ -48,6 +48,19 @@ class ConversationListToolsTest {
     }
 
     @Test
+    fun hiddenSystemMessagesAreNotSearchResults() {
+        val source = conv("hidden", "Chat", "private instruction", "visible reply")
+        val c = source.copy(messages = source.messages.mapIndexed { i, m ->
+            if (i == 0) m.copy(role = MessageRole.SYSTEM) else m
+        })
+        assertEquals(emptyList<Conversation>(), ConversationListTools.filter(listOf(c), "private instruction"))
+        assertNull(ConversationListTools.preview(c, "private instruction"))
+        assertEquals(listOf(c), ConversationListTools.filter(listOf(c), "visible reply"))
+        val systemOnly = c.copy(messages = c.messages.take(1))
+        assertEquals(emptyList<Conversation>(), ConversationListTools.searchable(listOf(systemOnly)))
+    }
+
+    @Test
     fun filterFindsTextAcrossMarkdownSymbols() {
         val list = listOf(conv("a", "Chat", "say hello **world** now"), conv("b", "Other", "hello there"))
         assertEquals(listOf("a"), ConversationListTools.filter(list, "hello world").map { it.id })

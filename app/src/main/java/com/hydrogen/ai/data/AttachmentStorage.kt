@@ -9,6 +9,8 @@ import java.io.InputStream
 import java.net.URI
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 sealed interface AttachmentImportResult {
@@ -63,8 +65,8 @@ class LocalAttachmentStorage(
 
         val attachmentId = UUID.randomUUID().toString()
         val safeName = sanitizeFileName(displayName)
-        if (!attachmentsDir.exists()) {
-            attachmentsDir.mkdirs()
+        if (!attachmentsDir.isDirectory && !attachmentsDir.mkdirs() && !attachmentsDir.isDirectory) {
+            return@withContext AttachmentImportResult.Failure("Could not create attachment storage.")
         }
         val destFile = File(attachmentsDir, "${attachmentId}_$safeName")
 
@@ -78,8 +80,10 @@ class LocalAttachmentStorage(
                 destFile.outputStream().use { output ->
                     val buffer = ByteArray(8192)
                     while (true) {
+                        coroutineContext.ensureActive()
                         val read = input.read(buffer)
-                        if (read <= 0) break
+                        if (read < 0) break
+                        if (read == 0) throw java.io.IOException("Attachment stream returned no data.")
                         totalBytes += read
                         if (totalBytes > maxPersistBytes) {
                             throw IllegalArgumentException(
@@ -90,6 +94,7 @@ class LocalAttachmentStorage(
                     }
                 }
             }
+            coroutineContext.ensureActive()
             if (totalBytes <= 0L) {
                 destFile.delete()
                 return@withContext AttachmentImportResult.Failure("Attachment '$displayName' is empty.")
@@ -103,9 +108,15 @@ class LocalAttachmentStorage(
                     localUri = destFile.toURI().toString()
                 )
             )
-        } catch (e: Exception) {
+        } catch (e: CancellationException) {
             destFile.delete()
-            AttachmentImportResult.Failure(e.message ?: "Failed to import '$displayName'.")
+            throw e
+        } catch (e: IllegalArgumentException) {
+            destFile.delete()
+            AttachmentImportResult.Failure("Attachment exceeds the local storage limit or is invalid.")
+        } catch (_: Exception) {
+            destFile.delete()
+            AttachmentImportResult.Failure("Could not import '$displayName'. Check file access and available storage.")
         }
     }
 
@@ -152,6 +163,14 @@ fun computeSampleSize(srcWidth: Int, srcHeight: Int, reqWidth: Int, reqHeight: I
         while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
             inSampleSize *= 2
         }
+    }
+    // Preserve aspect ratio but cap the decoded pixel count of unusually wide/tall images.
+    val budget = (reqWidth.toLong() * reqHeight.toLong()).coerceAtMost(Long.MAX_VALUE / 5) * 5
+    while (((srcWidth.toLong() + inSampleSize - 1) / inSampleSize) *
+        ((srcHeight.toLong() + inSampleSize - 1) / inSampleSize) > budget &&
+        inSampleSize <= Int.MAX_VALUE / 2
+    ) {
+        inSampleSize *= 2
     }
     return inSampleSize
 }

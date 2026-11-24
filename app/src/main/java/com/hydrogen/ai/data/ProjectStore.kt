@@ -22,7 +22,6 @@ class InMemoryProjectStore(private var projects: List<Project> = emptyList()) : 
 /** JSON in [dir]/orbit_projects.json, written through a temp file; no projects removes the file and any half-written copy. */
 class FileProjectStore(private val dir: File) : ProjectStore {
     private val file get() = File(dir, "orbit_projects.json")
-    private val tmp get() = File(dir, "orbit_projects.json.tmp")
 
     override suspend fun load(): List<Project> = withContext(Dispatchers.IO) {
         runCatching { if (file.exists()) Projects.decode(file.readText()) else emptyList() }
@@ -31,19 +30,10 @@ class FileProjectStore(private val dir: File) : ProjectStore {
 
     override suspend fun save(projects: List<Project>) = withContext(Dispatchers.IO) {
         if (projects.isEmpty()) {
-            file.delete()
-            tmp.delete()
+            SafeFileReplace.deleteSnapshot(file)
             return@withContext
         }
-        dir.mkdirs()
-        tmp.writeText(Projects.encode(projects))
-        if (!tmp.renameTo(file)) {
-            file.delete()
-            if (!tmp.renameTo(file)) {
-                tmp.copyTo(file, overwrite = true)
-                tmp.delete()
-            }
-        }
+        SafeFileReplace.writeText(file, Projects.encode(projects))
         Unit
     }
 }

@@ -6,6 +6,7 @@ import com.hydrogen.ai.model.ProviderRoute
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -28,6 +29,26 @@ object RelayErrorClassifier {
     const val LAYER_BUSY = "provider_busy"
     const val LAYER_KEY = "provider"
 
+    /** Returns true if the error is transient and a retry is likely to succeed. */
+    fun isTransientError(category: ProviderErrorCategory): Boolean = when (category) {
+        ProviderErrorCategory.OVERLOADED -> true
+        ProviderErrorCategory.QUOTA_RATE_TPM_RPM_429 -> true
+        ProviderErrorCategory.QUOTA_DAILY_429 -> false
+        ProviderErrorCategory.SERVER_5XX -> true
+        ProviderErrorCategory.CONTENT_FILTERED -> false
+        ProviderErrorCategory.BAD_REQUEST_400 -> false
+        ProviderErrorCategory.FORBIDDEN_403 -> false
+        ProviderErrorCategory.UNAUTHORIZED_RELAY_401 -> false
+        ProviderErrorCategory.UNAUTHORIZED_UPSTREAM_401 -> false
+        ProviderErrorCategory.MODEL_NOT_FOUND -> false
+        ProviderErrorCategory.CONTEXT_TOO_LONG -> false
+        ProviderErrorCategory.REQUEST_TOO_LARGE -> false
+        ProviderErrorCategory.UNKNOWN_PROTOCOL -> false
+        ProviderErrorCategory.OUT_OF_CREDITS -> false
+        ProviderErrorCategory.REGION_UNAVAILABLE -> false
+        else -> false
+    }
+
     /** An error event inside a stream, or null when the event isn't an error. */
     fun classifySseErrorPayload(
         dataPayload: String,
@@ -41,10 +62,13 @@ object RelayErrorClassifier {
         } catch (_: Exception) {
             null
         } ?: return null
-        val errorEl = root["error"] ?: return null
+        val errorEl = root["error"]?.takeUnless { it == JsonNull } ?: return null
         val errorObj = errorEl as? JsonObject
-        val code = (errorObj?.get("code") as? JsonPrimitive)?.intOrNull
+        val codeValue = errorObj?.get("code") as? JsonPrimitive
+        val code = codeValue?.intOrNull?.takeIf { it in 400..599 }
+            ?: statusForErrorType(codeValue?.contentOrNull)
             ?: statusForErrorType((errorObj?.get("type") as? JsonPrimitive)?.contentOrNull)
+            ?: statusForErrorType((errorObj?.get("status") as? JsonPrimitive)?.contentOrNull)
             ?: 500
         return classifyHttpError(
             statusCode = code,
@@ -56,14 +80,15 @@ object RelayErrorClassifier {
 
     /** Anthropic-format error types carry no status inside a stream; these are the statuses they come with. */
     internal fun statusForErrorType(type: String?): Int? = when (type?.lowercase()) {
-        "invalid_request_error" -> 400
-        "authentication_error" -> 401
-        "billing_error" -> 402
-        "permission_error" -> 403
-        "not_found_error" -> 404
+        "invalid_request_error", "invalid_argument", "context_length_exceeded" -> 400
+        "authentication_error", "invalid_api_key", "unauthenticated" -> 401
+        "billing_error", "insufficient_quota", "insufficient_credits" -> 402
+        "permission_error", "permission_denied" -> 403
+        "not_found_error", "model_not_found", "not_found" -> 404
         "request_too_large" -> 413
-        "rate_limit_error" -> 429
-        "api_error" -> 500
+        "rate_limit_error", "rate_limit_exceeded", "resource_exhausted" -> 429
+        "api_error", "internal" -> 500
+        "unavailable" -> 503
         "overloaded_error" -> 529
         else -> null
     }
@@ -132,6 +157,16 @@ object RelayErrorClassifier {
                     "or pick a model that reads more.",
                 LAYER_CONTEXT
             )
+        }
+
+        if (statusCode in setOf(400, 422) &&
+            listOf("reasoning_effort", "thinking_level", "thinkinglevel", "thinking level", "output_config", "reasoning.effort")
+                .any { bodyLower.contains(it) } &&
+            listOf("unsupported", "not supported", "invalid", "not allowed", "unknown", "unrecognized", "not permitted")
+                .any { bodyLower.contains(it) }) {
+            return error(ProviderErrorCategory.BAD_REQUEST_400,
+                "The model or provider rejected this reasoning setting. Select Automatic in the composer or Models & API keys, then retry.",
+                "provider_reasoning")
         }
 
         if (looksModelNotFound(statusCode, bodyLower, hosted = svc != null)) {
@@ -375,4 +410,6 @@ object RelayErrorClassifier {
 
     private fun parseRetryDelayFromBody(bodyLower: String): Int? =
         Regex(""""retrydelay"\s*:\s*"(\d+)s"""").find(bodyLower)?.groupValues?.get(1)?.toIntOrNull()?.coerceAtLeast(1)
+
+
 }

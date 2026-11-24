@@ -14,15 +14,6 @@ class CustomPersonaStore(private val file: File) {
     }
 
     fun save(personas: List<Persona>) {
-        file.parentFile?.mkdirs()
-        val tmp = File(file.parentFile, file.name + ".tmp")
-        tmp.writeText(CustomPersonaLibrary.encode(personas))
-        if (!tmp.renameTo(file)) {
-            file.delete()
-            if (!tmp.renameTo(file)) {
-                tmp.copyTo(file, overwrite = true)
-                tmp.delete()
-            }
-        }
+        SafeFileReplace.writeText(file, CustomPersonaLibrary.encode(personas))
     }
 }

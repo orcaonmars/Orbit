@@ -9,6 +9,7 @@ import java.io.File
 import java.io.InputStream
 import java.net.URI
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
 
 data class EncodedImagePayload(
@@ -37,7 +38,8 @@ internal fun readAndEncodeImageStream(
     var total = 0L
     while (true) {
         val read = input.read(buffer)
-        if (read <= 0) break
+        if (read < 0) break
+        if (read == 0) return ImageLoadResult.MissingOrUnreadable("Attachment stream returned no data.")
         total += read
         if (total > maxBytes) {
             return ImageLoadResult.MissingOrUnreadable(
@@ -71,7 +73,7 @@ class AndroidContentImagePayloadLoader(
                 if (parsed.scheme == "file") {
                     val resolvedMime = expectedMimeType.takeIf { it.startsWith("image/") }
                         ?: return@withContext ImageLoadResult.MissingOrUnreadable(
-                            "Unsupported or unknown image MIME type for $localUri"
+                            "Unsupported or unknown image MIME type."
                         )
                     val file = File(parsed)
                     if (!file.exists() || !file.isFile) {
@@ -94,11 +96,11 @@ class AndroidContentImagePayloadLoader(
                     ?.takeIf { it.startsWith("image/") }
                     ?: expectedMimeType.takeIf { it.startsWith("image/") }
                     ?: return@withContext ImageLoadResult.MissingOrUnreadable(
-                        "Unsupported or unknown image MIME type for $localUri"
+                        "Unsupported or unknown image MIME type."
                     )
                 val stream = context.contentResolver.openInputStream(uri)
                     ?: return@withContext ImageLoadResult.MissingOrUnreadable(
-                        "Cannot open attachment stream for $localUri"
+                        "Cannot open attachment stream."
                     )
                 stream.use { input ->
                     readAndEncodeImageStream(
@@ -108,8 +110,10 @@ class AndroidContentImagePayloadLoader(
                         encodeBase64 = { Base64.encodeToString(it, Base64.NO_WRAP) }
                     )
                 }
-            } catch (e: Exception) {
-                ImageLoadResult.MissingOrUnreadable(e.message ?: "Failed to read attachment")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                ImageLoadResult.MissingOrUnreadable("Failed to read attachment.")
             }
         }
 }

@@ -25,6 +25,59 @@ class PromptLibraryTest {
     }
 
     @Test
+    fun searchMatchesTitleAndBodyAndPreservesOrder() {
+        val a = SavedPrompt("a", "Code review", "Check security issues")
+        val b = SavedPrompt("b", "Security review", "Check Kotlin code")
+        val c = SavedPrompt("c", "Translate", "French")
+        val list = listOf(a, b, c)
+        assertSame(list, PromptLibrary.search(list, " "))
+        assertEquals(listOf(a, b), PromptLibrary.search(list, " CODE   security "))
+        assertEquals(listOf(c), PromptLibrary.search(list, "french"))
+        assertEquals(emptyList<SavedPrompt>(), PromptLibrary.search(list, "missing"))
+    }
+
+    @Test
+    fun previewCollapsesLinesAndIsBoundedWithoutEditingOriginal() {
+        val original = "First\n second\t" + "x".repeat(300)
+        val prompt = SavedPrompt("p", "Title", original)
+        assertEquals("First second " + "x".repeat(167), PromptLibrary.preview(prompt))
+        assertEquals(original, prompt.text)
+    }
+
+    @Test
+    fun staleEditsCannotOverwriteNewerSavedPrompts() {
+        val dir = Files.createTempDirectory("prompt-conflict").toFile()
+        try {
+            val file = File(dir, "prompts.json")
+            val first = PromptLibraryStore(file)
+            val second = PromptLibraryStore(file)
+            val snapshot = first.loadForEditing()
+            val updated = PromptLibrary.add(snapshot, "New prompt", "new")
+            org.junit.Assert.assertTrue(first.saveIfUnchanged(snapshot, updated))
+            org.junit.Assert.assertFalse(second.saveIfUnchanged(snapshot, emptyList()))
+            assertEquals(updated, second.loadForEditing())
+            file.writeText("{corrupt")
+            org.junit.Assert.assertThrows(java.io.IOException::class.java) { first.saveIfUnchanged(updated, emptyList()) }
+            assertEquals("{corrupt", file.readText())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
+    fun invalidLibraryCannotBeOpenedForEditing() {
+        val dir = Files.createTempDirectory("prompt-strict").toFile()
+        try {
+            val file = File(dir, "prompts.json")
+            val store = PromptLibraryStore(file)
+            assertEquals(PromptLibrary.starterPrompts, store.loadForEditing())
+            file.writeText("{broken")
+            org.junit.Assert.assertThrows(java.io.IOException::class.java) { store.loadForEditing() }
+            assertEquals("{broken", file.readText())
+            store.save(emptyList())
+            assertEquals(emptyList<SavedPrompt>(), store.loadForEditing())
+        } finally { dir.deleteRecursively() }
+    }
+
+    @Test
     fun insertKeepsExistingDraft() {
         assertEquals("Summarize:", PromptLibrary.insertIntoDraft("  ", "Summarize:"))
         assertEquals("my notes\n\nSummarize:", PromptLibrary.insertIntoDraft("my notes  \n", "Summarize:"))

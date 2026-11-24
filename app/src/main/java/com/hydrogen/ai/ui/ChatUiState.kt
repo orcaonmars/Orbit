@@ -57,6 +57,8 @@ data class ModelListUiState(
     val message: String? = null
 )
 
+data class ParkedChatDraft(val text: String, val attachments: List<AttachmentManifestItem>)
+
 data class ChatUiState(
     val isLoading: Boolean = true,
     val isSending: Boolean = false,
@@ -64,6 +66,7 @@ data class ChatUiState(
     val conversations: List<Conversation> = emptyList(),
     val activeConversationId: String? = null,
     val draftText: String = "",
+    val parkedDrafts: Map<String, ParkedChatDraft> = emptyMap(),
     val stagedAttachments: List<AttachmentManifestItem> = emptyList(),
     val preflightWarnings: List<String> = emptyList(),
     val relayConfig: RelayConfig = RelayConfig(),
@@ -77,6 +80,7 @@ data class ChatUiState(
     val modelList: ModelListUiState = ModelListUiState(),
     /** A sent message of yours being edited in the composer; sending makes a new version of it (the old one is kept). */
     val editingMessageId: String? = null,
+    val draftBeforeEdit: ParkedChatDraft? = null,
     /** Notes the user asked Orbit to remember; stored only on this device and added to the system message. */
     val memoryItems: List<MemoryItem> = emptyList(),
     val memoryEnabled: Boolean = true,

@@ -38,7 +38,10 @@ object ConversationTitler {
         "[file]",
         "[pdf]",
         "[code]",
-        "[code block]"
+        "[code block]",
+        "(attachment)",
+        "(file)",
+        "(image)"
     )
 
     fun titleFor(firstUserMessage: String): String {

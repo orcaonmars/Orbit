@@ -240,6 +240,68 @@ class ChatViewModelTemporaryChatTest {
     }
 
     @Test
+    fun temporaryChatCannotInheritSavedDraftAttachments() = runTest(testDispatcher) {
+        val s = setup()
+        advanceUntilIdle()
+        val savedId = s.vm.uiState.value.activeConversationId!!
+        s.vm.addStagedAttachment(AttachmentManifestItem("saved", "saved.png", "image/png", 10L, "file:/tmp/saved.png"))
+        s.vm.startTemporaryChat()
+        assertTrue(s.vm.uiState.value.stagedAttachments.isEmpty())
+        s.vm.addStagedAttachment(AttachmentManifestItem("temp", "temp.png", "image/png", 10L, "file:/tmp/temp.png"))
+        s.vm.leaveTemporaryChat()
+        assertEquals(savedId, s.vm.uiState.value.activeConversationId)
+        assertEquals(listOf("saved"), s.vm.uiState.value.stagedAttachments.map { it.id })
+        assertEquals(listOf("file:/tmp/temp.png"), s.deleted)
+    }
+
+    @Test
+    fun deletingParkedDraftsAndAllDataDisposesOnlyTheirFiles() = runTest(testDispatcher) {
+        val s = setup()
+        advanceUntilIdle()
+        val first = s.vm.uiState.value.activeConversationId!!
+        s.vm.addStagedAttachment(AttachmentManifestItem("a", "a.png", "image/png", 10L, "file:/tmp/a.png"))
+        s.vm.createNewConversation()
+        advanceUntilIdle()
+        s.vm.addStagedAttachment(AttachmentManifestItem("b", "b.png", "image/png", 10L, "file:/tmp/b.png"))
+        s.vm.deleteConversation(first)
+        advanceUntilIdle()
+        assertEquals(listOf("file:/tmp/a.png"), s.deleted)
+        assertEquals(listOf("b"), s.vm.uiState.value.stagedAttachments.map { it.id })
+        s.vm.createNewConversation()
+        advanceUntilIdle()
+        s.vm.deleteAllLocalData()
+        advanceUntilIdle()
+        assertEquals(listOf("file:/tmp/a.png", "file:/tmp/b.png"), s.deleted)
+        assertTrue(s.vm.uiState.value.parkedDrafts.isEmpty())
+    }
+
+    @Test
+    fun lateImportsBelongToOriginatingChatAndDeletedTargetsRejectFiles() = runTest(testDispatcher) {
+        val s = setup()
+        advanceUntilIdle()
+        val origin = s.vm.uiState.value.activeConversationId!!
+        s.vm.updateDraft("Original draft")
+        s.vm.createNewConversation()
+        advanceUntilIdle()
+        s.vm.updateDraft("Unrelated draft")
+        assertTrue(s.vm.appendImportedText(origin, "Document text"))
+        assertTrue(s.vm.addStagedAttachment(
+            AttachmentManifestItem("late", "late.png", "image/png", 10L, "file:/tmp/late.png"), origin))
+        assertEquals("Unrelated draft", s.vm.uiState.value.draftText)
+        assertTrue(s.vm.uiState.value.stagedAttachments.isEmpty())
+        s.vm.selectConversation(origin)
+        assertTrue(s.vm.uiState.value.draftText.contains("Document text"))
+        assertEquals(listOf("late"), s.vm.uiState.value.stagedAttachments.map { it.id })
+        s.vm.deleteConversation(origin)
+        advanceUntilIdle()
+        assertFalse(s.vm.appendImportedText(origin, "Must not appear"))
+        assertFalse(s.vm.addStagedAttachment(
+            AttachmentManifestItem("deleted", "deleted.png", "image/png", 10L, "file:/tmp/deleted.png"), origin))
+        assertTrue(s.deleted.contains("file:/tmp/deleted.png"))
+        assertFalse(s.vm.uiState.value.draftText.contains("Must not appear"))
+    }
+
+    @Test
     fun branchingIsOffInATemporaryChat() = runTest(testDispatcher) {
         val s = setup()
         advanceUntilIdle()
@@ -323,5 +385,32 @@ class ChatViewModelTemporaryChatTest {
 
         assertTrue(s.vm.uiState.value.personal.isEmpty)
         assertTrue(s.personal.load().isEmpty)
+    }
+
+    @Test
+    fun editingAndCancellingPreservesUnsentDraftFiles() = runTest(testDispatcher) {
+        val s = setup()
+        advanceUntilIdle()
+        s.vm.send("First question")
+        advanceUntilIdle()
+        val sentId = s.vm.uiState.value.activeConversation!!.messages.first().id
+        val draft = AttachmentManifestItem("draft", "notes.png", "image/png", 10L, "file:/tmp/draft.png")
+        s.vm.updateDraft("Unsent follow-up")
+        s.vm.addStagedAttachment(draft)
+        s.vm.startEditingMessage(sentId)
+        assertEquals("First question", s.vm.uiState.value.draftText)
+        assertTrue(s.vm.uiState.value.stagedAttachments.isEmpty())
+        assertFalse(s.deleted.contains(draft.localUri))
+        s.vm.cancelEditing()
+        assertEquals("Unsent follow-up", s.vm.uiState.value.draftText)
+        assertEquals(listOf(draft), s.vm.uiState.value.stagedAttachments)
+        assertFalse(s.deleted.contains(draft.localUri))
+        s.vm.startEditingMessage(sentId)
+        s.vm.updateDraft("Edited question")
+        s.vm.sendMessage()
+        advanceUntilIdle()
+        assertEquals("Unsent follow-up", s.vm.uiState.value.draftText)
+        assertEquals(listOf(draft), s.vm.uiState.value.stagedAttachments)
+        assertFalse(s.deleted.contains(draft.localUri))
     }
 }

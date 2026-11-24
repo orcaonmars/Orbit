@@ -56,6 +56,9 @@ class HttpGeminiHydrogenRelayBackend(
             }
             val token = bearerToken?.trim().orEmpty()
             val service = serviceNameOf(baseUrl)
+            if (com.hydrogen.ai.model.ReasoningPolicy.isOpenRouter(baseUrl)) {
+                return@withContext probeOpenRouterKey(token)
+            }
             if (service != null && remoteModelProbeAllowed(baseUrl, token)) {
                 // A known online service (OpenAI, Groq, Mistral...) never has the self-hosted status page: go straight to
                 // its model list with the user's key, the same request chat makes anyway.
@@ -141,6 +144,11 @@ class HttpGeminiHydrogenRelayBackend(
         }
         val model = request.modelId.ifBlank { config.modelId }.trim()
         val useStream = request.stream && config.streamingEnabled
+        val effectiveRequest = request.copy(
+            reasoningEffort = com.hydrogen.ai.model.ReasoningPolicy.compatibleEffort(baseUrl, model, config.reasoningMode),
+            openRouterReasoningEffort = com.hydrogen.ai.model.ReasoningPolicy.openRouterEffort(baseUrl, model, config.reasoningMode, config.openRouterReasoningModels),
+            completionTokenBudget = com.hydrogen.ai.model.ReasoningPolicy.cleanApisBudget(baseUrl, config.reasoningMode)
+        )
         val hasSystem = request.messages.any { it.role == MessageRole.SYSTEM }
         val foldKey = "$baseUrl|$model"
         // Some local chat templates have no system role (Gemma 2 in LM Studio, older Mistral builds) and refuse the
@@ -150,7 +158,7 @@ class HttpGeminiHydrogenRelayBackend(
             (HttpGoogleAiStudioBackend.isGemmaModel(model) || foldKey in systemRoleRefused)
         val first = dispatchOnce(
             baseUrl, token, wifi, model, useStream,
-            if (foldUpFront) withInstructionsInFirstUserTurn(request) else request,
+            if (foldUpFront) withInstructionsInFirstUserTurn(effectiveRequest) else effectiveRequest,
             onStreamDelta
         )
         val failure = first.result as? ChatDispatchResult.Failure
@@ -160,7 +168,7 @@ class HttpGeminiHydrogenRelayBackend(
             return@withContext first.result
         }
         systemRoleRefused += foldKey
-        dispatchOnce(baseUrl, token, wifi, model, useStream, withInstructionsInFirstUserTurn(request), onStreamDelta).result
+        dispatchOnce(baseUrl, token, wifi, model, useStream, withInstructionsInFirstUserTurn(effectiveRequest), onStreamDelta).result
     }
 
     /** Model servers (base URL and model) that refused a system message; later sends fold it into the user turn. */
@@ -250,13 +258,13 @@ class HttpGeminiHydrogenRelayBackend(
         }
     }
 
-    private data class PayloadBuildResult(
+    internal data class PayloadBuildResult(
         val body: JsonObject? = null,
         val usedVision: Boolean = false,
         val error: ProviderError? = null
     )
 
-    private suspend fun buildPayload(
+    internal suspend fun buildPayload(
         model: String,
         stream: Boolean,
         request: ChatDispatchRequest
@@ -322,6 +330,12 @@ class HttpGeminiHydrogenRelayBackend(
             put("model", model)
             put("stream", stream)
             put("messages", JsonArray(messagesJson))
+            request.completionTokenBudget?.let { put("max_tokens", it) }
+            request.reasoningEffort?.let { put("reasoning_effort", it) }
+            request.openRouterReasoningEffort?.let { effort ->
+                put("reasoning", buildJsonObject { put("effort", effort) })
+                put("provider", buildJsonObject { put("require_parameters", true) })
+            }
         }
         return PayloadBuildResult(body = root, usedVision = usedVision)
     }
@@ -403,6 +417,44 @@ class HttpGeminiHydrogenRelayBackend(
         }
     }
 
+    /** OpenRouter's public model catalog cannot verify credentials. Use its documented current-key endpoint. */
+    private fun probeOpenRouterKey(token: String): RelayHealthResult {
+        if (token.isBlank()) return RelayHealthResult.Failure(ProviderError(
+            category = ProviderErrorCategory.UNCONFIGURED,
+            userMessage = "Add an OpenRouter API key to test authentication. Browsing models does not require a key.",
+            sourceLayer = "client"
+        ))
+        var conn: HttpURLConnection? = null
+        try {
+            conn = (URL("https://openrouter.ai/api/v1/key").openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = false
+                requestMethod = "GET"
+                connectTimeout = connectTimeoutMs
+                readTimeout = readTimeoutMs
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Authorization", "Bearer "+token)
+            }
+            val code = conn.responseCode
+            val body = readStream(conn, code >= 400)
+            if (code !in 200..299) return RelayHealthResult.Failure(
+                RelayErrorClassifier.classifyHttpError(code, body, conn.getHeaderField("Retry-After"),
+                    ProviderRoute.GEMINI_HYDROGEN_RELAY, "OpenRouter")
+            )
+            val summary = openRouterKeyStatus(body) ?: return RelayHealthResult.Failure(ProviderError(
+                category = ProviderErrorCategory.UNKNOWN_PROTOCOL,
+                httpStatus = code,
+                userMessage = "OpenRouter returned an unexpected key-check response. Your key was not verified.",
+                technicalDetail = "Unexpected current-key response format",
+                sourceLayer = "relay"
+            ))
+            return RelayHealthResult.Reachable(authenticated = true, detail = summary)
+        } catch (e: IOException) {
+            return RelayHealthResult.Failure(NetworkErrorClassifier.classify(e, "https://openrouter.ai", "OpenRouter"))
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
     /**
      * Health for an https OpenAI-compatible provider. A 2xx model list proves the host speaks the API; a 401/403
      * proves the key was rejected. Still never claims the key is verified: some providers list models without auth.
@@ -469,7 +521,8 @@ class HttpGeminiHydrogenRelayBackend(
                 return@withContext listWifiModels(wifi, baseUrl)
             }
             val service = serviceNameOf(baseUrl)
-            if (token.isEmpty() && !isLoopbackOrEmulatorHost(baseUrl)) {
+            val publicCatalog = com.hydrogen.ai.model.ReasoningPolicy.isOpenRouter(baseUrl)
+            if (token.isEmpty() && !publicCatalog && !isLoopbackOrEmulatorHost(baseUrl)) {
                 return@withContext ModelListResult.Failure(
                     "Add your ${service ?: "server's"} API key first. Only servers on this PC or your home Wi-Fi " +
                         "work without one."
@@ -483,7 +536,7 @@ class HttpGeminiHydrogenRelayBackend(
                     connectTimeout = connectTimeoutMs
                     readTimeout = readTimeoutMs
                     setRequestProperty("Accept", "application/json")
-                    if (token.isNotEmpty()) setRequestProperty("Authorization", "Bearer $token")
+                    if (token.isNotEmpty() && !publicCatalog) setRequestProperty("Authorization", "Bearer $token")
                 }
                 val code = conn.responseCode
                 val body = readStream(conn, code >= 400)
@@ -509,7 +562,7 @@ class HttpGeminiHydrogenRelayBackend(
                         }
                     )
                 } else {
-                    ModelListResult.Success(normalized)
+                    ModelListResult.Success(normalized, if (publicCatalog) parseOpenRouterReasoningModels(body).intersect(normalized.map { it.lowercase() }.toSet()) else null)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -715,7 +768,7 @@ class HttpGeminiHydrogenRelayBackend(
 
     companion object {
         private val LOCAL_MODEL_HOSTS = setOf("127.0.0.1", "localhost", "10.0.2.2", "::1")
-        const val MAX_LISTED_MODELS = 200
+        const val MAX_LISTED_MODELS = 2_000
 
         /**
          * True for the error a chat template gives when it has no system role, for example LM Studio's
@@ -801,6 +854,29 @@ class HttpGeminiHydrogenRelayBackend(
          * Model ids from a /v1/models answer. Takes the OpenAI shape {"data":[{"id":...}]}, a bare array of models
          * (Together) and {"models":[{"id" or "name":...}]}. Null when the body is none of these.
          */
+        internal fun openRouterKeyStatus(body: String): String? {
+            val root = runCatching { Json.parseToJsonElement(body) as? JsonObject }.getOrNull() ?: return null
+            val data = root["data"] as? JsonObject ?: return null
+            val free = data["is_free_tier"] as? JsonPrimitive ?: return null
+            if (free.isString) return null
+            return when (free.content) {
+                "true" -> "OpenRouter key accepted (free tier). Choose a free model; inference and limits are untested."
+                "false" -> "OpenRouter key accepted. Model access and inference are untested; paid models may incur charges."
+                else -> null
+            }
+        }
+
+        internal fun parseOpenRouterReasoningModels(body: String): Set<String> {
+            val root = runCatching { Json.parseToJsonElement(body) as? JsonObject }.getOrNull() ?: return emptySet()
+            val entries = root["data"] as? JsonArray ?: return emptySet()
+            return entries.mapNotNull { entry ->
+                val obj = entry as? JsonObject ?: return@mapNotNull null
+                val params = obj["supported_parameters"] as? JsonArray ?: return@mapNotNull null
+                if (params.none { (it as? JsonPrimitive)?.contentOrNull == "reasoning" }) return@mapNotNull null
+                (obj["id"] as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+            }.take(MAX_LISTED_MODELS).toSet()
+        }
+
         internal fun parseModelIds(body: String): List<String>? {
             val root = runCatching { Json.parseToJsonElement(body) }.getOrNull() ?: return null
             fun idsOf(items: JsonArray): List<String> = items.mapNotNull { item ->

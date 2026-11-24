@@ -19,7 +19,9 @@ data class SavedConnection(
     val needsKey: Boolean = false,
     val lastUsedAtEpochMs: Long = 0L,
     /** A user's optional nickname for this connection. Never used for credential identity. */
-    val label: String = ""
+    val label: String = "",
+    val reasoningMode: ReasoningMode = ReasoningMode.AUTO,
+    val pinned: Boolean = false
 ) {
     /** Same server and model, whatever the other settings. */
     fun sameTarget(other: SavedConnection): Boolean = key == other.key
@@ -29,7 +31,7 @@ data class SavedConnection(
 }
 
 object SavedConnections {
-    const val MAX = 12
+    const val MAX = 60
     const val MAX_LABEL = 40
     private const val MAX_FIELD = 300
 
@@ -51,7 +53,8 @@ object SavedConnections {
             modelId = model,
             webSearchEnabled = config.route == ProviderRoute.GOOGLE_AI_STUDIO_DIRECT && config.webSearchEnabled,
             needsKey = hasKey,
-            lastUsedAtEpochMs = nowEpochMs
+            lastUsedAtEpochMs = nowEpochMs,
+            reasoningMode = config.reasoningMode
         )
     }
 
@@ -61,10 +64,16 @@ object SavedConnections {
         // Once a key was needed for this server, keep remembering that even if it is missing right now.
         val merged = connection.copy(
             needsKey = connection.needsKey || previous?.needsKey == true,
-            label = previous?.label ?: connection.label
+            label = previous?.label ?: connection.label,
+            pinned = previous?.pinned ?: connection.pinned
         )
-        return (listOf(merged) + list.filterNot { it.sameTarget(connection) }).take(MAX)
+        val ordered = listOf(merged) + list.filterNot { it.sameTarget(connection) }
+        val kept = (ordered.filter { it.pinned } + ordered.filterNot { it.pinned }).take(MAX).map { it.key }.toSet()
+        return ordered.filter { it.key in kept }
     }
+
+    fun setPinned(list: List<SavedConnection>, connection: SavedConnection, pinned: Boolean): List<SavedConnection> =
+        list.map { if (it.sameTarget(connection)) it.copy(pinned = pinned) else it }
 
     fun rename(list: List<SavedConnection>, connection: SavedConnection, rawLabel: String): List<SavedConnection> {
         val clean = rawLabel.trim().take(MAX_LABEL)
@@ -92,6 +101,7 @@ object SavedConnections {
         return when (ProviderPresets.detect(config)) {
             ProviderPreset.LM_STUDIO -> "LM Studio · $host"
             ProviderPreset.OLLAMA -> "Ollama · $host"
+            ProviderPreset.CLEAN_APIS -> "Clean APIs"
             ProviderPreset.HYDROGEN_RELAY -> "Relay · $host"
             else -> if (uri.port != -1) "$host:${uri.port}" else host
         }

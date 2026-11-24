@@ -132,4 +132,11 @@ class CodeFileNameTest {
             }
         }
     }
+    @Test
+    fun windows_reserved_device_names_use_safe_fallback() {
+        for (name in listOf("CON", "Prn", "AUX", "nul", "COM1", "LPT9")) {
+            assertEquals("orbit-snippet-2.kt", CodeFileName.suggest("kotlin", "class $name", 2))
+        }
+        assertEquals("COM10.kt", CodeFileName.suggest("kotlin", "class COM10"))
+    }
 }

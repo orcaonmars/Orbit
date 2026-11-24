@@ -20,8 +20,13 @@ enum class QuickAction(val intentAction: String) {
         /** The action for an incoming intent, or null for a normal launch, a share or anything unknown. */
         fun fromIntentAction(action: String?): QuickAction? = when {
             action.isNullOrBlank() -> null
-            action == SYSTEM_ASSIST -> NEW_CHAT
-            else -> values().firstOrNull { it.intentAction == action }
+            else -> {
+                val trimmed = action.trim()
+                when {
+                    trimmed == SYSTEM_ASSIST -> NEW_CHAT
+                    else -> values().firstOrNull { it.intentAction == trimmed }
+                }
+            }
         }
     }
 }

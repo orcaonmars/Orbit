@@ -1,17 +1,15 @@
 *.iml
 .gradle
-.kotlin
-build/
-local.properties
-.idea/
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
 .DS_Store
+/build
 /captures
 .externalNativeBuild
 .cxx
-
-# never commit builds or signing keys
-*.apk
-*.aab
-*.p12
-*.jks
-*.keystore
+local.properties

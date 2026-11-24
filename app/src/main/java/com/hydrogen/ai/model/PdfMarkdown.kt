@@ -29,36 +29,121 @@ object PdfMarkdown {
      * opening tag and is marked incomplete. Text parts that are only blank space are left out.
      */
     fun splitReply(content: String): List<ReplyPart> {
-        if (!hasDocument(content)) return listOf(ReplyPart.Text(content))
+        val tags = documentTags(content)
+        if (tags.none { it.open }) return listOf(ReplyPart.Text(content))
         val parts = mutableListOf<ReplyPart>()
-        var rest = content
-        while (true) {
-            val open = OPEN_TAG.find(rest)
-            if (open == null) {
-                if (rest.isNotBlank()) parts += ReplyPart.Text(rest.trim())
-                break
-            }
-            val before = rest.substring(0, open.range.first)
+        var cursor = 0
+        var i = 0
+        while (i < tags.size) {
+            val tag = tags[i++]
+            if (!tag.open) continue
+            val open = tag.match
+            val before = content.substring(cursor, open.range.first)
             if (before.isNotBlank()) parts += ReplyPart.Text(before.trim())
-            val afterOpen = rest.substring(open.range.last + 1)
-            val close = CLOSE_TAG.find(afterOpen)
-            val rawBody = if (close == null) afterOpen else afterOpen.substring(0, close.range.first)
+            while (i < tags.size && tags[i].open) i++
+            val close = tags.getOrNull(i)?.match
+            val rawBody = content.substring(open.range.last + 1, close?.range?.first ?: content.length)
             val body = OUTER_FENCE.find(rawBody)?.groupValues?.get(1) ?: rawBody
             val title = open.groupValues[1].trim().ifEmpty { titleOf(body) }
             parts += ReplyPart.Document(title, body.trim('\n', '\r', ' '), complete = close != null)
-            if (close == null) break
-            rest = afterOpen.substring(close.range.last + 1)
+            if (close == null) return parts
+            cursor = close.range.last + 1
+            i++
         }
+        val after = content.substring(cursor)
+        if (after.isNotBlank()) parts += ReplyPart.Text(after.trim())
         return parts
     }
 
-    /** True when the reply holds at least one document. */
-    fun hasDocument(content: String): Boolean = OPEN_TAG.containsMatchIn(content)
+    /** True only for actual document markup, not examples inside code. */
+    fun hasDocument(content: String): Boolean = documentTags(content).any { it.open }
 
-    /** The reply with document tags removed, for copying, reading aloud and sharing as text. */
-    fun plainText(content: String): String =
-        if (!hasDocument(content)) content else content.replace(OPEN_TAG, "").replace(CLOSE_TAG, "").trim()
+    /** Remove actual document wrappers while preserving literal code and unmatched closing tags. */
+    fun plainText(content: String): String {
+        val tags = documentTags(content)
+        if (tags.none { it.open }) return content
+        val out = StringBuilder(content.length)
+        var cursor = 0
+        var inside = false
+        for (tag in tags) {
+            if (tag.open == inside) continue
+            out.append(content, cursor, tag.match.range.first)
+            cursor = tag.match.range.last + 1
+            inside = tag.open
+        }
+        out.append(content, cursor, content.length)
+        return out.toString().trim()
+    }
 
+    private data class DocumentTag(val match: MatchResult, val open: Boolean)
+    private val FENCE_LINE = Regex("(?m)^[ \t]{0,3}(`{3,}|~{3,})([^\r\n]*)")
+    private val BACKTICK_RUN = Regex("`+")
+
+    private fun documentTags(content: String): List<DocumentTag> {
+        if (!OPEN_TAG.containsMatchIn(content)) return emptyList()
+        val protectedRanges = codeRanges(content).sortedBy { it.first }
+        val candidates = (OPEN_TAG.findAll(content).map { DocumentTag(it, true) } +
+            CLOSE_TAG.findAll(content).map { DocumentTag(it, false) })
+            .sortedBy { it.match.range.first }.toList()
+        var rangeIndex = 0
+        return candidates.filter { tag ->
+            val position = tag.match.range.first
+            while (rangeIndex < protectedRanges.size && protectedRanges[rangeIndex].last < position) rangeIndex++
+            !escapedAt(content, position) && protectedRanges.getOrNull(rangeIndex)?.contains(position) != true
+        }
+    }
+
+    /** Markdown fences can contain longer examples; only a matching fence closes them. */
+    private fun codeRanges(content: String): List<IntRange> {
+        val ranges = mutableListOf<IntRange>()
+        var opened: MatchResult? = null
+        for (line in FENCE_LINE.findAll(content)) {
+            val run = line.groupValues[1]
+            val opening = opened
+            if (opening == null) {
+                if (run[0] != '`' || !line.groupValues[2].contains('`')) opened = line
+            } else {
+                val startRun = opening.groupValues[1]
+                if (run[0] == startRun[0] && run.length >= startRun.length && line.groupValues[2].isBlank()) {
+                    ranges += opening.range.first..line.range.last
+                    opened = null
+                }
+            }
+        }
+        opened?.let { ranges += it.range.first until content.length }
+        val fences = ranges.toList()
+        var cursor = 0
+        for (fence in fences) {
+            inlineCodeRanges(content, cursor, fence.first, ranges)
+            cursor = fence.last + 1
+        }
+        inlineCodeRanges(content, cursor, content.length, ranges)
+        return ranges
+    }
+
+    private fun inlineCodeRanges(content: String, start: Int, end: Int, ranges: MutableList<IntRange>) {
+        if (start >= end) return
+        val runs = BACKTICK_RUN.findAll(content, start).takeWhile { it.range.first < end }.toList()
+        val next = IntArray(runs.size) { -1 }
+        val byLength = mutableMapOf<Int, Int>()
+        for (i in runs.indices.reversed()) {
+            next[i] = byLength.put(runs[i].value.length, i) ?: -1
+        }
+        var i = 0
+        while (i < runs.size) {
+            val close = next[i]
+            if (close >= 0 && !escapedAt(content, runs[i].range.first)) {
+                ranges += runs[i].range.first..runs[close].range.last
+                i = close + 1
+            } else i++
+        }
+    }
+
+    private fun escapedAt(content: String, index: Int): Boolean {
+        var i = index - 1
+        while (i >= 0 && content[i] == '\\') i--
+        return (index - 1 - i) % 2 != 0
+    }
     /** True when the user's own words ask for a PDF, used to offer one for a reply that has no document. */
     fun asksForPdf(userText: String): Boolean = ASKS_FOR_PDF.containsMatchIn(userText)
 

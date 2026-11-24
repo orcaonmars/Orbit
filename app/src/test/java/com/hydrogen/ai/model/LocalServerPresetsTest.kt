@@ -46,4 +46,14 @@ class LocalServerPresetsTest {
         assertTrue(LocalServerPresets.hintFor("http://10.0.2.2:1234")!!.contains("token optional"))
         assertNull(LocalServerPresets.hintFor("https://relay.example.com"))
     }
+
+    @Test
+    fun privateServerClassificationRejectsEmbeddedCredentialsAndNonHttpSchemes() {
+        assertFalse(LocalServerPresets.isLocalServer("ftp://127.0.0.1:1234"))
+        assertFalse(LocalServerPresets.isLocalServer("http://admin:secret@127.0.0.1:1234"))
+        assertFalse(LocalServerPresets.isWifiServer("http://admin:secret@192.168.1.20:1234"))
+        assertFalse(LocalServerPresets.isPrivateServer("javascript:alert(1)"))
+        assertTrue(LocalServerPresets.isLocalServer("https://127.0.0.1:1234"))
+        assertTrue(LocalServerPresets.isWifiServer("http://192.168.1.20:1234"))
+    }
 }

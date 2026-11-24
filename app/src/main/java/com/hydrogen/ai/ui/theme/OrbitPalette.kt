@@ -165,4 +165,8 @@ val LocalOrbitPalette = staticCompositionLocalOf { OrbitPalettes.Night }
 
 object OrbitTheme {
     val colors: OrbitPalette @Composable @ReadOnlyComposable get() = LocalOrbitPalette.current
+    val space: OrbitSpacing @Composable @ReadOnlyComposable get() = LocalOrbitSpacing.current
+    val shapes: OrbitShapeTokens @Composable @ReadOnlyComposable get() = LocalOrbitShapeTokens.current
+    val motion: OrbitMotionTokens @Composable @ReadOnlyComposable get() = LocalOrbitMotionTokens.current
+    val type: androidx.compose.material3.Typography @Composable @ReadOnlyComposable get() = LocalOrbitTypography.current
 }

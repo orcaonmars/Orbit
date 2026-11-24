@@ -11,6 +11,8 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 internal data class AccumulatedStreamResult(
     val text: String,
@@ -110,6 +112,10 @@ internal object SseStreamReader {
         }
         val body = openBody()?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
         onRawEvent?.invoke(body)
+        // Some gateways return a JSON error envelope with HTTP 200.
+        RelayErrorClassifier.classifySseErrorPayload(body, route, serviceName)?.let {
+            return ChatDispatchResult.Failure(it)
+        }
         val parsed = RelayResponseParser.parseCompleteResponse(body)?.let { whole ->
             // Inline <think> blocks from local reasoning models go to the thought line, not the answer.
             val split = ThinkingSplitter.split(whole.text)
@@ -169,9 +175,14 @@ internal object SseStreamReader {
         var latestSignature: String? = null
         var finishReason: String? = null
         var isTruncated = false
+        var receivedDone = false
         var isFiltered = false
         var streamError: ProviderError? = null
         val toolCalls = mutableListOf<ToolCallRecord>()
+        // Index is stable across OpenAI delta events even when subsequent events omit the id and name.
+        data class PendingTool(var id: String? = null, val name: StringBuilder = StringBuilder(),
+            val arguments: StringBuilder = StringBuilder())
+        val pendingTools = sortedMapOf<Int, PendingTool>()
         // Inline <think> blocks from local reasoning models stream to the thought line, not the answer.
         val splitter = ThinkingSplitter()
 
@@ -182,6 +193,12 @@ internal object SseStreamReader {
             if (thinkingDelta.isNotEmpty()) thinkingBuilder.append(thinkingDelta)
             if (!chunk.thoughtSignature.isNullOrBlank()) latestSignature = chunk.thoughtSignature
             if (chunk.toolCalls.isNotEmpty()) toolCalls += chunk.toolCalls
+            for (fragment in chunk.toolCallFragments) {
+                val pending = pendingTools.getOrPut(fragment.index) { PendingTool() }
+                if (!fragment.id.isNullOrBlank()) pending.id = fragment.id
+                fragment.name?.let { pending.name.append(it) }
+                fragment.arguments?.let { pending.arguments.append(it) }
+            }
             if (!chunk.finishReason.isNullOrBlank()) finishReason = chunk.finishReason
             if (chunk.isTruncated) isTruncated = true
             if (chunk.isContentFiltered) isFiltered = true
@@ -206,6 +223,7 @@ internal object SseStreamReader {
                         val payload = dataLines.joinToString("\n")
                         dataLines.clear()
                         onRawEvent?.invoke(payload)
+                        if (payload.trim() == "[DONE]") { receivedDone = true; break }
                         val chunk = RelayResponseParser.parseSseEventData(payload)
                         if (chunk != null) {
                             accept(chunk)
@@ -224,6 +242,7 @@ internal object SseStreamReader {
             if (streamError == null && dataLines.isNotEmpty()) {
                 val payload = dataLines.joinToString("\n")
                 onRawEvent?.invoke(payload)
+                if (payload.trim() == "[DONE]") receivedDone = true
                 val chunk = RelayResponseParser.parseSseEventData(payload)
                 if (chunk != null) {
                     accept(chunk)
@@ -233,6 +252,26 @@ internal object SseStreamReader {
             }
         }
         if (streamError == null) {
+            // Emit assembled records once, not misleading half-JSON tool arguments during streaming.
+            val terminal = receivedDone || finishReason.equals("tool_calls", ignoreCase = true) ||
+                finishReason.equals("stop", ignoreCase = true)
+            val assembled = if (!terminal || isTruncated || isFiltered) emptyList() else
+                pendingTools.mapNotNull { (index, pending) ->
+                    val name = pending.name.toString()
+                    val arguments = pending.arguments.toString()
+                    // Never surface a half-assembled request or fabricate missing arguments.
+                    val valid = runCatching { Json.parseToJsonElement(arguments) is JsonObject }.getOrDefault(false)
+                    if (name.isBlank() || !valid) null
+                    else ToolCallRecord(pending.id ?: "call_stream_$index", name, arguments)
+                }
+            if (assembled.size < pendingTools.size && !isFiltered && !isTruncated) {
+                isTruncated = true
+                finishReason = "tool_call_incomplete"
+            }
+            if (assembled.isNotEmpty()) {
+                toolCalls += assembled
+                onDelta(StreamDelta(toolCalls = assembled))
+            }
             // Release anything the splitter held back (a reply that is only "<", or an unclosed block).
             val tail = splitter.finish()
             if (!tail.isEmpty()) {
@@ -251,14 +290,16 @@ internal object SseStreamReader {
             }
         }
 
+        val interrupted = streamError == null && !receivedDone && finishReason.isNullOrBlank() &&
+            finalText.isNotBlank() && route == ProviderRoute.GEMINI_HYDROGEN_RELAY
         return AccumulatedStreamResult(
             text = finalText,
             metadata = RelayResponseParser.toMetadata(
                 thoughtSignature = latestSignature,
                 thinkingSummary = finalThinking,
                 toolCalls = toolCalls,
-                finishReason = finishReason,
-                isTruncated = isTruncated
+                finishReason = if (interrupted) "stream_interrupted" else finishReason,
+                isTruncated = isTruncated || interrupted
             ),
             isContentFiltered = isFiltered,
             streamError = streamError

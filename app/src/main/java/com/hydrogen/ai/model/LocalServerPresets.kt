@@ -26,16 +26,24 @@ object LocalServerPresets {
     val presets: List<LocalServerPreset>
         get() = SERVERS.map { (label, port) -> LocalServerPreset(label, pcUrl(port)) }
 
+    /** Trimmed http(s) base URL, or null when blank, not http(s), or carrying embedded credentials. */
+    private fun safeHttpUrl(baseUrl: String): String? {
+        val url = baseUrl.trim().trimEnd('/')
+        if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) return null
+        if (url.substringAfter("://").substringBefore('/').contains('@')) return null
+        return url
+    }
+
     /** On this PC: loopback (USB `adb reverse`) or the emulator's host alias. */
     fun isLocalServer(baseUrl: String): Boolean =
-        baseUrl.isNotBlank() && HttpGeminiHydrogenRelayBackend.isLoopbackOrEmulatorHost(baseUrl.trim().trimEnd('/'))
+        safeHttpUrl(baseUrl)?.let { HttpGeminiHydrogenRelayBackend.isLoopbackOrEmulatorHost(it) } == true
 
     /**
      * On the home Wi-Fi: plain http to a private IPv4 address (e.g. http://192.168.1.20:1234). Chats there are not
      * encrypted on the local network, and Orbit never sends an access key to it.
      */
     fun isWifiServer(baseUrl: String): Boolean =
-        baseUrl.isNotBlank() && HttpGeminiHydrogenRelayBackend.isWifiModelHost(baseUrl.trim().trimEnd('/'))
+        safeHttpUrl(baseUrl)?.let { HttpGeminiHydrogenRelayBackend.isWifiModelHost(it) } == true
 
     /** The user's own server, on this PC or on the home Wi-Fi: no key needed, nothing leaves the home network. */
     fun isPrivateServer(baseUrl: String): Boolean = isLocalServer(baseUrl) || isWifiServer(baseUrl)

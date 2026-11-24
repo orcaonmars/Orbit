@@ -7,11 +7,14 @@ import com.hydrogen.ai.model.AppearancePrefs
 class AppearanceStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("hydrogen_appearance", Context.MODE_PRIVATE)
 
-    fun load(): AppearancePrefs = AppearancePrefs.parse(
-        themeMode = prefs.getString(KEY_MODE, null),
-        accent = prefs.getString(KEY_ACCENT, null),
-        pureBlack = prefs.getBoolean(KEY_PURE_BLACK, false)
-    )
+    fun load(): AppearancePrefs {
+        val values = prefs.all
+        return AppearancePrefs.parseStoredValues(
+            themeMode = values[KEY_MODE],
+            accent = values[KEY_ACCENT],
+            pureBlack = values[KEY_PURE_BLACK]
+        )
+    }
 
     fun save(value: AppearancePrefs) {
         prefs.edit()
