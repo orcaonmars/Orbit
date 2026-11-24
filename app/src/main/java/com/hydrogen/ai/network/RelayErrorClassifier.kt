@@ -339,26 +339,25 @@ object RelayErrorClassifier {
         retryAfter: Int?,
         svc: String?
     ): ProviderError {
-        val isRate = bodyLower.contains("per_minute") ||
-            bodyLower.contains("perminute") ||
-            bodyLower.contains("requests per minute") ||
-            bodyLower.contains("tokens per minute") ||
-            bodyLower.contains("rate_limit") ||
-            bodyLower.contains("rate limit") ||
-            bodyLower.contains("too many requests") ||
-            bodyLower.contains("rpm") ||
-            bodyLower.contains("tpm")
-        val isDaily = !isRate && (
-            bodyLower.contains("daily") || bodyLower.contains("per_day") ||
-                bodyLower.contains("perday") || bodyLower.contains("free_tier") ||
-                bodyLower.contains("requests per day") || bodyLower.contains("quota_exhausted") ||
-                bodyLower.contains("resource_exhausted")
-            )
+        // Generic RESOURCE_EXHAUSTED and free-tier labels do not specify a quota period.
+        val explicitRate = bodyLower.contains("per_minute") ||
+            bodyLower.contains("perminute") || bodyLower.contains("per minute") ||
+            bodyLower.contains("per_second") || bodyLower.contains("persecond") ||
+            bodyLower.contains("per second") ||
+            Regex("""\b(rpm|tpm|rps)\b""").containsMatchIn(bodyLower)
+        val explicitDaily = bodyLower.contains("per_day") ||
+            bodyLower.contains("perday") || bodyLower.contains("per day") ||
+            Regex("""\bdaily[ _-]+(quota|limit|request|token|usage)""").containsMatchIn(bodyLower) ||
+            Regex("""\b(rpd|tpd)\b""").containsMatchIn(bodyLower)
+        val isDaily = explicitDaily && !explicitRate
+        val isRate = !explicitDaily && (explicitRate ||
+            bodyLower.contains("rate_limit") || bodyLower.contains("rate limit") ||
+            bodyLower.contains("too many requests"))
         return if (isDaily) {
             ProviderError(
                 category = ProviderErrorCategory.QUOTA_DAILY_429,
                 httpStatus = status,
-                userMessage = "You've used today's free limit for this key. It resets tomorrow. Orbit never switches to a " +
+                userMessage = "The service reports a daily quota limit for this model or account. Check its reset time. Orbit never switches to a " +
                     "paid service on its own.",
                 technicalDetail = detail,
                 retryAfterSeconds = retryAfter,
@@ -367,14 +366,18 @@ object RelayErrorClassifier {
         } else {
             val waitHint = retryAfter?.let { if (it == 1) " Try again in 1 second." else " Try again in $it seconds." }
                 ?: " Wait a minute, then try again."
-            val lead = if (svc != null) "Too many requests to $svc in a short time." else "Too many requests in a short time."
+            val lead = if (isRate) {
+                if (svc != null) "Too many requests to $svc in a short time." else "Too many requests in a short time."
+            } else {
+                "The service reports a quota or capacity limit, but has not confirmed that your daily allowance is exhausted."
+            }
             ProviderError(
                 category = ProviderErrorCategory.QUOTA_RATE_TPM_RPM_429,
                 httpStatus = status,
                 userMessage = "$lead$waitHint",
                 technicalDetail = detail,
                 retryAfterSeconds = retryAfter,
-                sourceLayer = "upstream_quota_rate"
+                sourceLayer = if (isRate) "upstream_quota_rate" else "upstream_quota_unknown"
             )
         }
     }

@@ -16,6 +16,35 @@ class RelayErrorClassifierTest {
         assertEquals("upstream_quota_daily", error.sourceLayer)
     }
 
+    @Test fun genericQuotaDoesNotImplyDailyExhaustion() {
+        for (body in listOf(
+            """{"error":{"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded for free_tier"}}""",
+            """{"error":{"code":"quota_exhausted","message":"Capacity exhausted"}}""",
+            """{"error":{"status":"RESOURCE_EXHAUSTED"}}"""
+        )) {
+            val error = RelayErrorClassifier.classifyHttpError(429, body, "15")
+            assertEquals(ProviderErrorCategory.QUOTA_RATE_TPM_RPM_429, error.category)
+            assertEquals("upstream_quota_unknown", error.sourceLayer)
+            assertEquals(15, error.retryAfterSeconds)
+            assertTrue(error.userMessage.contains("has not confirmed"))
+            assertTrue(RelayErrorClassifier.isTransientError(error.category))
+        }
+    }
+
+    @Test fun explicitDailyQuotaWinsOverGenericRateLimitCode() {
+        val error = RelayErrorClassifier.classifyHttpError(
+            429, """{"error":{"code":"rate_limit_exceeded","message":"Requests per day limit reached"}}"""
+        )
+        assertEquals(ProviderErrorCategory.QUOTA_DAILY_429, error.category)
+        assertFalse(error.userMessage.contains("resets tomorrow"))
+    }
+
+    @Test fun mixedQuotaPeriodsDoNotClaimDailyExhaustion() {
+        val error = RelayErrorClassifier.classifyHttpError(
+            429, "Quota limits: requests per minute and requests per day"
+        )
+        assertEquals("upstream_quota_unknown", error.sourceLayer)
+    }
     @Test fun temporaryRateLimitPreservesRetryAfter() {
         val error = RelayErrorClassifier.classifyHttpError(
             429, """{"error":{"message":"Requests per minute exceeded"}}""", "12"
