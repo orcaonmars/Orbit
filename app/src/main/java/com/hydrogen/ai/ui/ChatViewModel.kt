@@ -42,8 +42,10 @@ import com.hydrogen.ai.data.cleanBackupTokens
 import com.hydrogen.ai.model.OrbitInstructions
 import com.hydrogen.ai.model.Personal
 import com.hydrogen.ai.model.PersonalProfile
+import com.hydrogen.ai.model.ShareIntentParser
 import com.hydrogen.ai.model.UserMemory
 import com.hydrogen.ai.model.AttachmentManifestItem
+import com.hydrogen.ai.model.ChatConnectionPreference
 import com.hydrogen.ai.model.ChatMessage
 import com.hydrogen.ai.data.ChatBackupCodec
 import com.hydrogen.ai.model.Conversation
@@ -162,8 +164,6 @@ class ChatViewModel(
         viewModelScope.launch {
             val savedConfig = configStore.loadConfig()
             (credentialStore as? CompositeRelayCredentialStore)?.persistEnabled = savedConfig.rememberTokenInKeystore
-            val token = credentialStore.getToken(savedConfig)
-            val hasToken = !token.isNullOrBlank()
             val companionConfig = companionSessionStore.loadConfig()
             val companionSession = companionSessionStore.loadSession()
             val loaded = conversationStore.loadConversations()
@@ -181,6 +181,9 @@ class ChatViewModel(
             if (loaded.isEmpty() || didReconcile || loadProblem != null) {
                 conversationStore.saveConversations(initialList)
             }
+            val initialConfig = initialList.first { !it.archived }.preferredConnection?.applyTo(savedConfig) ?: savedConfig
+            val token = credentialStore.getToken(initialConfig)
+            val hasToken = !token.isNullOrBlank()
             val initialCompanion = CompanionUiState(
                 config = companionConfig,
                 session = companionSession
@@ -204,12 +207,12 @@ class ChatViewModel(
                     isLoading = false,
                     conversations = initialList,
                     activeConversationId = initialList.first { c -> !c.archived }.id,
-                    relayConfig = savedConfig,
+                    relayConfig = initialConfig,
                     hasToken = hasToken,
                     maskedTokenLabel = maskSecretToken(token),
-                    backupKeyLabels = backupLabels(savedConfig),
-                    capabilities = savedConfig.capabilities(),
-                    readiness = buildBaselineReadiness(savedConfig, hasToken, computeWorkMode(initialCompanion)),
+                    backupKeyLabels = backupLabels(initialConfig),
+                    capabilities = initialConfig.capabilities(),
+                    readiness = buildBaselineReadiness(initialConfig, hasToken, computeWorkMode(initialCompanion)),
                     companion = initialCompanion,
                     memoryItems = memory.items,
                     memoryEnabled = memory.enabled
@@ -237,6 +240,14 @@ class ChatViewModel(
         _uiState.update { it.copy(memoryItems = after) }
         persistMemory()
         return true
+    }
+
+    fun setMemoryPinned(id: String, pinned: Boolean) {
+        val before = _uiState.value.memoryItems
+        val after = UserMemory.setPinned(before, id, pinned)
+        if (after == before) return
+        _uiState.update { it.copy(memoryItems = after) }
+        persistMemory()
     }
 
     fun removeMemory(id: String) {
@@ -304,7 +315,9 @@ class ChatViewModel(
                 current.conversations.flatMap { c ->
                     MessageVersions.everyMessage(c.messages).flatMap { m -> m.attachments.map { it.localUri } }.toList()
                 } +
-                    current.stagedAttachments.map { it.localUri }
+                    current.stagedAttachments.map { it.localUri } +
+                    current.parkedDrafts.values.flatMap { it.attachments }.map { it.localUri } +
+                    current.draftBeforeEdit?.attachments.orEmpty().map { it.localUri }
                 ).distinct()
             val fresh = listOf(newBlankConversation(clock(), freshConfig))
             conversationStore.saveConversations(fresh)
@@ -322,6 +335,9 @@ class ChatViewModel(
                     conversations = fresh,
                     activeConversationId = fresh.first().id,
                     draftText = "",
+                    parkedDrafts = emptyMap(),
+                    draftBeforeEdit = null,
+                    editingMessageId = null,
                     stagedAttachments = emptyList(),
                     preflightWarnings = emptyList(),
                     memoryItems = emptyList(),
@@ -409,8 +425,17 @@ class ChatViewModel(
         _uiState.update { it.copy(draftText = text) }
     }
 
-    fun addStagedAttachment(item: AttachmentManifestItem) {
+    /** The target is captured before opening a picker or starting asynchronous file I/O. */
+    fun addStagedAttachment(item: AttachmentManifestItem, targetId: String? = _uiState.value.activeConversationId): Boolean {
+        var accepted = false
         _uiState.update { state ->
+            accepted = targetId != null && state.conversations.any { it.id == targetId }
+            if (!accepted || targetId == null) return@update state
+            if (targetId != state.activeConversationId) {
+                val before = state.parkedDrafts[targetId] ?: ParkedChatDraft("", emptyList())
+                return@update state.copy(parkedDrafts = state.parkedDrafts +
+                    (targetId to before.copy(attachments = before.attachments + item)))
+            }
             val updated = state.stagedAttachments + item
             val preview = state.activeConversation?.messages.orEmpty() + ChatMessage(
                 id = "preview",
@@ -423,6 +448,37 @@ class ChatViewModel(
             val preflight = PreflightValidator.assess(preview, state.relayConfig)
             state.copy(stagedAttachments = updated, preflightWarnings = preflight.warnings)
         }
+        if (!accepted) {
+            val current = _uiState.value
+            if (!isAttachmentUriReferenced(item.localUri, current.conversations, current.stagedAttachments)) {
+                onDeleteLocalAttachment(item.localUri)
+            }
+        }
+        return accepted
+    }
+
+    /** Imported text is merged into the originating draft, never whichever chat happens to be open. */
+    fun appendImportedText(targetId: String?, text: String): Boolean {
+        var accepted = false
+        _uiState.update { state ->
+            accepted = targetId != null && state.conversations.any { it.id == targetId }
+            if (!accepted || targetId == null) return@update state
+            if (targetId == state.activeConversationId) {
+                state.copy(draftText = ShareIntentParser.mergeIntoDraft(state.draftText, text))
+            } else {
+                val before = state.parkedDrafts[targetId] ?: ParkedChatDraft("", emptyList())
+                state.copy(parkedDrafts = state.parkedDrafts +
+                    (targetId to before.copy(text = ShareIntentParser.mergeIntoDraft(before.text, text))))
+            }
+        }
+        return accepted
+    }
+
+    fun stagedAttachmentCount(targetId: String?): Int {
+        val state = _uiState.value
+        if (targetId == null) return 0
+        return if (targetId == state.activeConversationId) state.stagedAttachments.size
+        else state.parkedDrafts[targetId]?.attachments?.size ?: 0
     }
 
     fun removeStagedAttachment(attachmentId: String) {
@@ -484,20 +540,26 @@ class ChatViewModel(
         }
     }
 
-    /** Unsent composer text per chat (memory only), so switching chats never carries a draft into another one. */
-    private val draftsByConversation = mutableMapOf<String, String>()
-
+    /** Park text AND files together. State is immutable so retries of StateFlow.update cannot mutate a side map. */
     private fun ChatUiState.withDraftSwappedTo(nextConversationId: String): ChatUiState {
         val currentId = activeConversationId
         if (currentId == nextConversationId) return this
+        val next = parkedDrafts[nextConversationId]
+        val parked = parkedDrafts.toMutableMap()
+        parked.remove(nextConversationId)
         if (currentId != null) {
-            if (draftText.isBlank()) draftsByConversation.remove(currentId) else draftsByConversation[currentId] = draftText
+            if (draftText.isBlank() && stagedAttachments.isEmpty()) parked.remove(currentId)
+            else parked[currentId] = ParkedChatDraft(draftText, stagedAttachments)
         }
-        // get(), not remove(): StateFlow.update may re-run this lambda, so the swap must be idempotent.
-        return copy(draftText = draftsByConversation[nextConversationId].orEmpty())
+        return copy(
+            draftText = next?.text.orEmpty(),
+            stagedAttachments = next?.attachments.orEmpty(),
+            parkedDrafts = parked.toMap()
+        )
     }
 
     fun selectConversation(conversationId: String) {
+        if (_uiState.value.conversations.none { it.id == conversationId }) return
         if (_uiState.value.editingMessageId != null && _uiState.value.activeConversationId != conversationId) {
             cancelEditing()
         }
@@ -506,10 +568,45 @@ class ChatViewModel(
             it.withDraftSwappedTo(conversationId)
                 .copy(activeConversationId = conversationId, preflightWarnings = emptyList())
         }
+        restoreChatConnection()
+    }
+
+    /** Switching chats restores only a trusted, device-local target, and resolves its own credentials. */
+    private fun restoreChatConnection() {
+        val state = _uiState.value
+        val chosen = state.activeConversation?.preferredConnection?.applyTo(state.relayConfig) ?: return
+        if (chosen == state.relayConfig) return
+        modelListGeneration++
+        val token = credentialStore.getToken(chosen)
+        val hasToken = !token.isNullOrBlank()
+        _uiState.update {
+            it.copy(
+                relayConfig = chosen,
+                modelList = ModelListUiState(),
+                hasToken = hasToken,
+                maskedTokenLabel = maskSecretToken(token),
+                backupKeyLabels = backupLabels(chosen),
+                capabilities = chosen.capabilities(),
+                readiness = buildBaselineReadiness(chosen, hasToken, computeWorkMode(it.companion))
+            )
+        }
+    }
+
+    /** Save a selection on the current chat only. Temporary chats remain in memory. */
+    private fun rememberChatConnection(config: RelayConfig) {
+        val preferred = ChatConnectionPreference.capture(config)
+        val active = _uiState.value.activeConversation ?: return
+        if (active.preferredConnection == preferred) return
+        _uiState.update { state ->
+            state.copy(conversations = state.conversations.map { conversation ->
+                if (conversation.id == active.id) conversation.copy(preferredConnection = preferred) else conversation
+            })
+        }
+        if (!active.temporary) viewModelScope.launch { conversationStore.saveConversations(_uiState.value.conversations) }
     }
 
     /** What the composer held before "Edit" filled it, restored if the edit is cancelled. */
-    private var draftBeforeEdit: String = ""
+    // The pre-edit draft is held in immutable UI state, including its attachments.
 
     /** Loads one of your sent messages (text and attachments) into the composer to change and resend. */
     fun startEditingMessage(messageId: String) {
@@ -517,8 +614,9 @@ class ChatViewModel(
         val messages = state.activeConversation?.messages.orEmpty()
         if (!EditResendPolicy.canEdit(messages, messageId, state.isSending)) return
         val message = messages.first { it.id == messageId }
-        if (state.editingMessageId == null) draftBeforeEdit = state.draftText
-        // Swap out unrelated staged files first (deleting any no message refers to), then stage the originals.
+        val original = state.draftBeforeEdit ?: ParkedChatDraft(state.draftText, state.stagedAttachments)
+        // Preserve unrelated draft files before clearing the edit composer.
+        _uiState.update { it.copy(draftBeforeEdit = original) }
         clearStagedAttachments()
         _uiState.update {
             it.copy(
@@ -533,8 +631,11 @@ class ChatViewModel(
     fun cancelEditing() {
         if (_uiState.value.editingMessageId == null) return
         clearStagedAttachments()
-        _uiState.update { it.copy(editingMessageId = null, draftText = draftBeforeEdit) }
-        draftBeforeEdit = ""
+        _uiState.update {
+            it.copy(editingMessageId = null, draftBeforeEdit = null,
+                draftText = it.draftBeforeEdit?.text.orEmpty(),
+                stagedAttachments = it.draftBeforeEdit?.attachments.orEmpty())
+        }
     }
 
     /**
@@ -599,7 +700,6 @@ class ChatViewModel(
             activeSendTarget = null
             job?.cancel()
         }
-        draftsByConversation.remove(temp.id)
         // Files attached in the temporary chat but not sent go with it, like its unsent text, so they can't follow
         // you into a saved chat.
         val unsentFiles = mutableListOf<String>()
@@ -607,9 +707,11 @@ class ChatViewModel(
             val wasOpen = state.activeConversationId == temp.id
             unsentFiles.clear()
             if (wasOpen) unsentFiles += state.stagedAttachments.map { it.localUri }
+            unsentFiles += state.parkedDrafts[temp.id]?.attachments.orEmpty().map { it.localUri }
             state.copy(
                 isSending = if (stoppingReply) false else state.isSending,
                 conversations = state.conversations.filterNot { it.id == temp.id },
+                parkedDrafts = state.parkedDrafts - temp.id,
                 // Null, so the draft swap that follows drops the temporary chat's unsent text instead of keeping it.
                 activeConversationId = if (wasOpen) null else state.activeConversationId,
                 draftText = if (wasOpen) "" else state.draftText,
@@ -634,27 +736,21 @@ class ChatViewModel(
         startConversation(projectId)
     }
 
-    private fun startConversation(projectId: String?) {
+    private fun startConversation(projectId: String?): Job {
         cancelEditing()
         discardTemporaryChat()
-        viewModelScope.launch {
+        return viewModelScope.launch {
             val current = _uiState.value
             val fresh = newBlankConversation(clock(), current.relayConfig).copy(projectId = projectId)
             val updated = listOf(fresh) + current.conversations
             conversationStore.saveConversations(updated)
-            val orphanedStagedUris = current.stagedAttachments
-                .map { it.localUri }
-                .distinct()
-                .filterNot { uri -> isAttachmentUriReferenced(uri, updated, emptyList()) }
             _uiState.update {
                 it.withDraftSwappedTo(fresh.id).copy(
                     conversations = updated,
                     activeConversationId = fresh.id,
-                    stagedAttachments = emptyList(),
                     preflightWarnings = emptyList()
                 )
             }
-            orphanedStagedUris.forEach(onDeleteLocalAttachment)
         }
     }
 
@@ -914,13 +1010,20 @@ class ChatViewModel(
             }
             conversationStore.saveConversations(nextList)
             val deletingActive = current.activeConversationId == conversationId
+            val deletedDraftUris = current.parkedDrafts[conversationId]?.attachments.orEmpty().map { it.localUri } +
+                (if (deletingActive) current.stagedAttachments.map { it.localUri } else emptyList())
             val nextActive = if (deletingActive) {
                 nextList.first { !it.archived }.id
             } else {
                 current.activeConversationId
             }
             _uiState.update {
-                it.copy(
+                val swapped = if (deletingActive && nextActive != null && it.activeConversationId == conversationId) {
+                    it.copy(activeConversationId = null, draftText = "", stagedAttachments = emptyList())
+                        .withDraftSwappedTo(nextActive)
+                } else it
+                swapped.copy(
+                    parkedDrafts = swapped.parkedDrafts - conversationId,
                     isSending = if (cancellingActiveSend) false else it.isSending,
                     conversations = nextList,
                     activeConversationId = nextActive,
@@ -928,15 +1031,25 @@ class ChatViewModel(
                 )
             }
             // Files from hidden versions go too; nothing else can show them once the chat is gone.
-            deleted?.messages
-                ?.let { MessageVersions.everyMessage(it).flatMap { m -> m.attachments }.toList() }
-                ?.map { it.localUri }
-                ?.distinct()
-                ?.filterNot { uri ->
+            (deleted?.messages.orEmpty().let { MessageVersions.everyMessage(it).flatMap { m -> m.attachments }.toList() }
+                .map { it.localUri } + deletedDraftUris)
+                .distinct()
+                .filterNot { uri ->
                     isAttachmentUriReferenced(uri, nextList, _uiState.value.stagedAttachments)
                 }
-                ?.forEach(onDeleteLocalAttachment)
+                .forEach(onDeleteLocalAttachment)
+            if (deletingActive) restoreChatConnection()
         }
+    }
+
+    fun setReasoningMode(mode: com.hydrogen.ai.model.ReasoningMode) {
+        if (_uiState.value.isSending) return
+        val config = _uiState.value.relayConfig
+        if (mode !in reasoningOptions(config.route, config.effectiveBaseUrl, config.modelId, config.openRouterReasoningModels)) return
+        val updated = config.copy(reasoningMode = mode)
+        configStore.saveConfig(updated)
+        _uiState.update { it.copy(relayConfig = updated) }
+        rememberChatConnection(updated)
     }
 
     fun saveRelaySettings(
@@ -950,7 +1063,8 @@ class ChatViewModel(
         rememberTokenInKeystore: Boolean,
         webSearchEnabled: Boolean,
         /** Null keeps the saved backup keys; a list replaces them. */
-        backupTokens: List<String>? = null
+        backupTokens: List<String>? = null,
+        reasoningMode: com.hydrogen.ai.model.ReasoningMode = _uiState.value.relayConfig.reasoningMode
     ) {
         val defaultModel = when (route) {
             ProviderRoute.GEMINI_HYDROGEN_RELAY -> HydrogenDefaults.PRIMARY_MODEL_ID
@@ -960,7 +1074,7 @@ class ChatViewModel(
         }
         val previous = _uiState.value.relayConfig
         // Keys are looked up by service/origin; switching retains each provider's own key.
-        val cleaned = previous.copy(
+        val draft = previous.copy(
             route = route,
             baseUrl = when (route) {
                 ProviderRoute.GEMINI_HYDROGEN_RELAY -> ProviderPresets.normalizeBaseUrl(baseUrl)
@@ -973,8 +1087,14 @@ class ChatViewModel(
             maxImagesPerRequest = maxImages.coerceIn(1, 32),
             streamingEnabled = streamingEnabled,
             rememberTokenInKeystore = rememberTokenInKeystore,
-            webSearchEnabled = webSearchEnabled
+            webSearchEnabled = webSearchEnabled,
+            reasoningMode = reasoningMode
         )
+        val scoped = if (draft.route == previous.route && draft.effectiveBaseUrl == previous.effectiveBaseUrl) draft
+            else draft.copy(openRouterReasoningModels = emptySet())
+        val cleaned = normalizeReasoning(scoped)
+        val sameConnection = cleaned.route == previous.route && cleaned.effectiveBaseUrl == previous.effectiveBaseUrl && token == null
+        if (!sameConnection) modelListGeneration++
         val compositeStore = credentialStore as? CompositeRelayCredentialStore
         compositeStore?.persistEnabled = rememberTokenInKeystore
         if (!rememberTokenInKeystore) {
@@ -998,16 +1118,20 @@ class ChatViewModel(
         _uiState.update {
             it.copy(
                 relayConfig = cleaned,
+                modelList = if (!sameConnection)
+                    ModelListUiState() else it.modelList,
                 hasToken = hasToken,
                 maskedTokenLabel = maskSecretToken(selectedToken),
                 backupKeyLabels = backupLabels(cleaned),
                 capabilities = cleaned.capabilities(),
-                readiness = buildBaselineReadiness(cleaned, hasToken, computeWorkMode(it.companion)),
+                readiness = if (sameConnection && cleaned.modelId == previous.modelId && hasToken == it.hasToken) it.readiness
+                    else buildBaselineReadiness(cleaned, hasToken, computeWorkMode(it.companion)),
                 notice = if (extraKeys.isEmpty()) it.notice
                 else "Saved the first key as your main key and kept the others as backup keys " +
                     "(${backupLabels(cleaned).size} now). Orbit switches to the next one if a key hits a limit."
             )
         }
+        rememberChatConnection(cleaned)
     }
 
     /**
@@ -1046,13 +1170,19 @@ class ChatViewModel(
         }
     }
 
+    private var modelListGeneration = 0L
+
     fun loadModelList() {
         val state = _uiState.value
         if (state.modelList.isLoading) return
         val config = state.relayConfig
+        val generation = ++modelListGeneration
+        val token = credentialStore.getToken(config)
+        _uiState.update { it.copy(modelList = ModelListUiState(isLoading = true, baseUrl = config.baseUrl)) }
         viewModelScope.launch {
-            _uiState.update { it.copy(modelList = ModelListUiState(isLoading = true, baseUrl = config.baseUrl)) }
-            val listed = when (val result = backend.listModels(config, credentialStore.getToken(config))) {
+            val result = backend.listModels(config, token)
+            if (generation != modelListGeneration) return@launch
+            val listed = when (result) {
                 is ModelListResult.Success -> ModelListUiState(
                     baseUrl = config.baseUrl,
                     modelIds = result.modelIds,
@@ -1062,7 +1192,17 @@ class ChatViewModel(
                 )
                 is ModelListResult.Failure -> ModelListUiState(baseUrl = config.baseUrl, message = result.message)
             }
-            _uiState.update { it.copy(modelList = listed) }
+            val current = _uiState.value.relayConfig
+            if (current.route != config.route || current.effectiveBaseUrl != config.effectiveBaseUrl ||
+                credentialStore.getToken(config) != token) {
+                _uiState.update { it.copy(modelList = ModelListUiState()) }
+                return@launch
+            }
+            val catalog = (result as? ModelListResult.Success)?.reasoningModelIds
+            val updated = if (catalog != null && com.hydrogen.ai.model.ReasoningPolicy.isOpenRouter(current.effectiveBaseUrl))
+                normalizeReasoning(current.copy(openRouterReasoningModels = catalog)) else current
+            if (updated != current) configStore.saveConfig(updated)
+            _uiState.update { it.copy(modelList = listed, relayConfig = updated) }
         }
     }
 
@@ -1071,8 +1211,9 @@ class ChatViewModel(
         if (state.isCheckingHealth) return
         viewModelScope.launch {
             _uiState.update { it.copy(isCheckingHealth = true) }
-            val result = backend.checkHealth(state.relayConfig, credentialStore.getToken(state.relayConfig))
-            if (_uiState.value.relayConfig != state.relayConfig) {
+            val checkedToken = credentialStore.getToken(state.relayConfig)
+            val result = backend.checkHealth(state.relayConfig, checkedToken)
+            if (_uiState.value.relayConfig != state.relayConfig || credentialStore.getToken(state.relayConfig) != checkedToken) {
                 // The connection changed while this check was in flight. Its answer is about the old
                 // service, so it must not overwrite the new service's readiness.
                 _uiState.update { it.copy(isCheckingHealth = false) }
@@ -2071,7 +2212,7 @@ class ChatViewModel(
             ?.takeIf { it >= 0 }
         if (state.editingMessageId != null) {
             _uiState.update { it.copy(editingMessageId = null) }
-            draftBeforeEdit = ""
+            // Restore the original draft below, once the edited turn is staged.
         }
         val now = clock()
         val correlationId = UUID.randomUUID().toString()
@@ -2103,11 +2244,14 @@ class ChatViewModel(
                 createdAtEpochMs = now + 1,
                 modelId = state.relayConfig.modelId,
                 status = MessageStatus.FAILED,
+                requestProfile = com.hydrogen.ai.model.ReplyRequestProfile.from(normalizeReasoning(state.relayConfig)),
                 error = preflight.blockingError
             )
             val updatedConversation = active.copy(
                 title = deriveTitle(active, trimmedDraft),
                 updatedAtEpochMs = now,
+                modelId = state.relayConfig.modelId,
+                route = state.relayConfig.route,
                 messages = markedHistoryWithUser + blockedReply
             )
             val updatedList = upsertConversation(state.conversations, updatedConversation)
@@ -2115,8 +2259,9 @@ class ChatViewModel(
                 it.copy(
                     conversations = updatedList,
                     activeConversationId = updatedConversation.id,
-                    draftText = "",
-                    stagedAttachments = emptyList(),
+                    draftText = state.draftBeforeEdit?.text.orEmpty(),
+                    stagedAttachments = state.draftBeforeEdit?.attachments.orEmpty(),
+                    draftBeforeEdit = null,
                     preflightWarnings = preflight.warnings
                 )
             }
@@ -2133,7 +2278,8 @@ class ChatViewModel(
             content = "",
             createdAtEpochMs = now + 1,
             modelId = state.relayConfig.modelId,
-            status = MessageStatus.DISPATCHED
+            status = MessageStatus.DISPATCHED,
+            requestProfile = com.hydrogen.ai.model.ReplyRequestProfile.from(normalizeReasoning(state.relayConfig))
         )
 
         val stagedConversation = active.copy(
@@ -2141,6 +2287,7 @@ class ChatViewModel(
             updatedAtEpochMs = now,
             // The chat's model is the one that answers this message, not the default it was created with.
             modelId = state.relayConfig.modelId,
+            route = state.relayConfig.route,
             messages = markedHistoryWithUser + pendingAssistant
         )
         val stagedList = upsertConversation(state.conversations, stagedConversation)
@@ -2150,8 +2297,9 @@ class ChatViewModel(
                 isSending = true,
                 conversations = stagedList,
                 activeConversationId = stagedConversation.id,
-                draftText = "",
-                stagedAttachments = emptyList(),
+                draftText = state.draftBeforeEdit?.text.orEmpty(),
+                stagedAttachments = state.draftBeforeEdit?.attachments.orEmpty(),
+                draftBeforeEdit = null,
                 preflightWarnings = preflight.warnings
             )
         }
@@ -2195,6 +2343,7 @@ class ChatViewModel(
                 applyDispatchResult(
                     conversationId = stagedConversation.id,
                     assistantMessageId = pendingAssistant.id,
+                    dispatchConfig = state.relayConfig,
                     result = result,
                     hadAttachments = attachments.isNotEmpty()
                 )
@@ -2207,6 +2356,7 @@ class ChatViewModel(
                     applyDispatchResult(
                         conversationId = stagedConversation.id,
                         assistantMessageId = pendingAssistant.id,
+                        dispatchConfig = state.relayConfig,
                         result = ChatDispatchResult.Failure(
                             ProviderError(
                                 category = ProviderErrorCategory.UNKNOWN_PROTOCOL,
@@ -2219,8 +2369,10 @@ class ChatViewModel(
                     )
                 }
             } finally {
-                activeSendJob = null
-                activeSendTarget = null
+                if (activeSendTarget == (stagedConversation.id to pendingAssistant.id)) {
+                    activeSendJob = null
+                    activeSendTarget = null
+                }
             }
         }
     }
@@ -2339,11 +2491,17 @@ class ChatViewModel(
 
         val now = clock()
         val regenerating = mode == RegeneratePolicy.Mode.REGENERATE
+        val preservePartial = !regenerating && targetIndex == active.messages.lastIndex && failedMessage.role == MessageRole.ASSISTANT &&
+            failedMessage.content.isNotBlank() && failedMessage.turnMetadata?.toolCalls.isNullOrEmpty()
+        val profile = com.hydrogen.ai.model.ReplyRequestProfile.from(normalizeReasoning(state.relayConfig))
+        val changedTarget = failedMessage.requestProfile?.let { !it.sameRequestTarget(profile) } ?: false
         val retryingAssistant = failedMessage.copy(
             // A regenerated reply is a new version beside the old one, so it gets its own id and time. It also needs a
             // fresh idempotency key, otherwise the relay returns the stored reply. A retry of a failed reply reuses all three.
-            id = if (regenerating) UUID.randomUUID().toString() else failedMessage.id,
-            correlationId = if (regenerating) UUID.randomUUID().toString() else failedMessage.correlationId,
+            id = if (regenerating || preservePartial) UUID.randomUUID().toString() else failedMessage.id,
+            correlationId = if (regenerating || changedTarget) UUID.randomUUID().toString() else failedMessage.correlationId,
+            modelId = state.relayConfig.modelId,
+            requestProfile = profile,
             createdAtEpochMs = if (regenerating) now else failedMessage.createdAtEpochMs,
             status = MessageStatus.DISPATCHED,
             content = "",
@@ -2364,13 +2522,14 @@ class ChatViewModel(
             return
         }
 
-        val updatedMessages = if (regenerating) {
+        val updatedMessages = if (regenerating || preservePartial) {
             // The old answer stays as an earlier version of this turn, behind the "< 1 / 2 >" arrows.
             MessageVersions.addVersion(markedHistoryBeforeFailed + active.messages.drop(targetIndex), targetIndex, retryingAssistant)
         } else {
             markedHistoryBeforeFailed + retryingAssistant + active.messages.drop(targetIndex + 1)
         }
-        val stagedConversation = active.copy(updatedAtEpochMs = now, messages = updatedMessages)
+        val stagedConversation = active.copy(updatedAtEpochMs = now, messages = updatedMessages,
+            modelId = state.relayConfig.modelId, route = state.relayConfig.route)
         val stagedList = upsertConversation(state.conversations, stagedConversation)
 
         _uiState.update {
@@ -2420,6 +2579,7 @@ class ChatViewModel(
                 applyDispatchResult(
                     conversationId = stagedConversation.id,
                     assistantMessageId = retryingAssistant.id,
+                    dispatchConfig = state.relayConfig,
                     result = result,
                     hadAttachments = historyBeforeFailed.lastOrNull()?.attachments?.isNotEmpty() == true
                 )
@@ -2432,6 +2592,7 @@ class ChatViewModel(
                     applyDispatchResult(
                         conversationId = stagedConversation.id,
                         assistantMessageId = retryingAssistant.id,
+                        dispatchConfig = state.relayConfig,
                         result = ChatDispatchResult.Failure(
                             ProviderError(
                                 category = ProviderErrorCategory.UNKNOWN_PROTOCOL,
@@ -2444,8 +2605,10 @@ class ChatViewModel(
                     )
                 }
             } finally {
-                activeSendJob = null
-                activeSendTarget = null
+                if (activeSendTarget == (stagedConversation.id to retryingAssistant.id)) {
+                    activeSendJob = null
+                    activeSendTarget = null
+                }
             }
         }
     }
@@ -2461,7 +2624,7 @@ class ChatViewModel(
         val active = state.activeConversation ?: return
         if (!com.hydrogen.ai.model.CompareModelsPolicy.canCompare(active.messages)) return
         val question = com.hydrogen.ai.model.CompareModelsPolicy.promptHistory(active.messages)
-        val config = state.relayConfig.copy(modelId = model)
+        val config = normalizeReasoning(state.relayConfig.copy(modelId = model))
         val now = clock()
         val preflight = PreflightValidator.assess(question, config)
         val answer = ChatMessage(
@@ -2473,7 +2636,8 @@ class ChatViewModel(
             modelId = model,
             status = if (preflight.blockingError != null) MessageStatus.FAILED else MessageStatus.DISPATCHED,
             error = preflight.blockingError,
-            comparison = true
+            comparison = true,
+            requestProfile = com.hydrogen.ai.model.ReplyRequestProfile.from(config)
         )
         val stagedConversation = active.copy(updatedAtEpochMs = now, messages = active.messages + answer)
         val stagedList = upsertConversation(state.conversations, stagedConversation)
@@ -2521,6 +2685,7 @@ class ChatViewModel(
                 applyDispatchResult(
                     conversationId = stagedConversation.id,
                     assistantMessageId = answer.id,
+                    dispatchConfig = config,
                     result = result,
                     hadAttachments = hadAttachments
                 )
@@ -2531,6 +2696,7 @@ class ChatViewModel(
                     applyDispatchResult(
                         conversationId = stagedConversation.id,
                         assistantMessageId = answer.id,
+                        dispatchConfig = config,
                         result = ChatDispatchResult.Failure(
                             ProviderError(
                                 category = ProviderErrorCategory.UNKNOWN_PROTOCOL,
@@ -2543,8 +2709,10 @@ class ChatViewModel(
                     )
                 }
             } finally {
-                activeSendJob = null
-                activeSendTarget = null
+                if (activeSendTarget == (stagedConversation.id to answer.id)) {
+                    activeSendJob = null
+                    activeSendTarget = null
+                }
             }
         }
     }
@@ -2603,143 +2771,133 @@ class ChatViewModel(
     ) {
         val now = clock()
         thinkingStartedAt.remove(assistantMessageId)
-        val currentState = _uiState.value
-        val conversation = currentState.conversations.firstOrNull { it.id == conversationId }
-        if (conversation == null) {
-            _uiState.update { it.copy(isSending = false) }
-            return
-        }
-        val target = conversation.messages.firstOrNull { it.id == assistantMessageId }
-        if (target == null || target.status == MessageStatus.CANCELLED || target.status == MessageStatus.COMPLETED) {
-            _uiState.update { it.copy(isSending = false) }
-            return
-        }
-        val updatedMessages = conversation.messages.map { msg ->
-            if (msg.id != assistantMessageId) msg else msg.copy(status = MessageStatus.CANCELLED)
-        }
-        val updatedConversation = conversation.copy(updatedAtEpochMs = now, messages = updatedMessages)
-        val updatedList = upsertConversation(currentState.conversations, updatedConversation)
-        conversationStore.saveConversations(updatedList)
-        _uiState.update {
-            it.copy(
-                isSending = false,
-                conversations = updatedList,
-                readiness = it.readiness.copy(
-                    lastVerifiedAtEpochMs = now,
-                    statusDetail = "Stopped. Anything already written is kept."
-                )
+        var changed = false
+        _uiState.update { state ->
+            changed = false
+            val conversation = state.conversations.firstOrNull { it.id == conversationId } ?: return@update state
+            val target = conversation.messages.firstOrNull { it.id == assistantMessageId } ?: return@update state
+            if (target.status !in setOf(MessageStatus.DISPATCHED, MessageStatus.STREAMING)) return@update state
+            val updated = conversation.copy(updatedAtEpochMs = now, messages = conversation.messages.map {
+                if (it.id == assistantMessageId) it.copy(status = MessageStatus.CANCELLED) else it
+            })
+            changed = true
+            val newerRequest = activeSendTarget != null && activeSendTarget != (conversationId to assistantMessageId)
+            state.copy(
+                conversations = upsertConversation(state.conversations, updated),
+                isSending = newerRequest,
+                readiness = if (!newerRequest && state.activeConversationId == conversationId) state.readiness.copy(
+                    lastVerifiedAtEpochMs = now, statusDetail = "Stopped. Anything already written is kept."
+                ) else state.readiness
             )
         }
+        if (changed) conversationStore.saveConversations(_uiState.value.conversations)
     }
 
     private suspend fun applyDispatchResult(
         conversationId: String,
         assistantMessageId: String,
+        dispatchConfig: RelayConfig,
         result: ChatDispatchResult,
         hadAttachments: Boolean
     ) {
         val now = clock()
         val thoughtSince = thinkingStartedAt.remove(assistantMessageId)
-        val currentState = _uiState.value
-        val conversation = currentState.conversations.firstOrNull { it.id == conversationId }
-        if (conversation == null) {
-            _uiState.update { it.copy(isSending = false) }
-            return
-        }
-        val target = conversation.messages.firstOrNull { it.id == assistantMessageId }
-        if (target?.status == MessageStatus.CANCELLED) {
-            _uiState.update { it.copy(isSending = false) }
-            return
-        }
-
-        val updatedMessages = conversation.messages.map { msg ->
-            if (msg.id != assistantMessageId) {
-                msg
-            } else {
-                when (result) {
-                    is ChatDispatchResult.Success -> msg.copy(
-                        status = MessageStatus.COMPLETED,
-                        content = result.assistantText,
-                        modelId = result.modelId,
-                        turnMetadata = result.turnMetadata,
-                        error = null,
-                        // A reply that thought but wrote no words (only tool calls) thought until the end.
-                        thinkingMs = if (result.turnMetadata?.thinkingSummary.isNullOrBlank()) {
-                            null
-                        } else {
-                            msg.thinkingMs ?: thoughtSince?.let { (now - it).coerceAtLeast(0) }
-                        }
-                    )
-                    is ChatDispatchResult.Failure -> msg.copy(
-                        status = MessageStatus.FAILED,
-                        content = msg.content,
-                        error = result.error
-                    )
+        var completedConversation: Conversation? = null
+        var completedModelId: String? = null
+        _uiState.update { currentState ->
+            completedConversation = null
+            completedModelId = null
+            val conversation = currentState.conversations.firstOrNull { it.id == conversationId } ?: return@update currentState
+            val target = conversation.messages.firstOrNull { it.id == assistantMessageId } ?: return@update currentState
+            if (target.status !in setOf(MessageStatus.DISPATCHED, MessageStatus.STREAMING)) return@update currentState
+            val updatedMessages = conversation.messages.map { msg ->
+                if (msg.id != assistantMessageId) {
+                    msg
+                } else {
+                    when (result) {
+                        is ChatDispatchResult.Success -> msg.copy(
+                            status = MessageStatus.COMPLETED,
+                            content = result.assistantText,
+                            modelId = result.modelId,
+                            turnMetadata = result.turnMetadata,
+                            error = null,
+                            // A reply that thought but wrote no words (only tool calls) thought until the end.
+                            thinkingMs = if (result.turnMetadata?.thinkingSummary.isNullOrBlank()) {
+                                null
+                            } else {
+                                msg.thinkingMs ?: thoughtSince?.let { (now - it).coerceAtLeast(0) }
+                            }
+                        )
+                        is ChatDispatchResult.Failure -> msg.copy(
+                            status = MessageStatus.FAILED,
+                            content = msg.content,
+                            error = result.error
+                        )
+                    }
                 }
             }
-        }
 
-        val updatedConversation = conversation.copy(
-            updatedAtEpochMs = now,
-            messages = updatedMessages
-        )
-        val updatedList = upsertConversation(currentState.conversations, updatedConversation)
-        conversationStore.saveConversations(updatedList)
-
-        val updatedReadiness = when (result) {
-            is ChatDispatchResult.Success -> {
-                val verifiedFeatures = buildList {
-                    add("text")
-                    if (result.wasStreamed) add("streaming")
-                    if (result.usedVision) add("vision")
-                    if (!result.turnMetadata?.toolCalls.isNullOrEmpty()) add("tools")
-                }.joinToString(", ")
-                val attachmentNote = if (hadAttachments && !result.usedVision) {
-                    " Attachments exceeded route limits and were preserved locally."
-                } else {
-                    ""
-                }
-                currentState.readiness.copy(
-                    configured = currentState.relayConfig.isConfigured &&
-                        credentialReady(currentState.relayConfig, currentState.hasToken),
-                    relayReachable = VerificationState.PASS,
-                    // A local loopback/emulator server (e.g. LM Studio) may ignore Authorization entirely, so its answer proves
-                    // reachability, not that a (placeholder) token was verified; keep the health result, as /v1/models does.
-                    authenticated = if (currentState.hasToken && !isLocalRelay(currentState.relayConfig)) {
-                        VerificationState.PASS
+            val updatedConversation = conversation.copy(
+                updatedAtEpochMs = now,
+                messages = updatedMessages
+            )
+            val updatedList = upsertConversation(currentState.conversations, updatedConversation)
+            val updatedReadiness = if (currentState.relayConfig != dispatchConfig) currentState.readiness else when (result) {
+                is ChatDispatchResult.Success -> {
+                    val verifiedFeatures = buildList {
+                        add("text")
+                        if (result.wasStreamed) add("streaming")
+                        if (result.usedVision) add("vision")
+                        if (!result.turnMetadata?.toolCalls.isNullOrEmpty()) add("tools")
+                    }.joinToString(", ")
+                    val attachmentNote = if (hadAttachments && !result.usedVision) {
+                        " Attachments exceeded route limits and were preserved locally."
                     } else {
-                        currentState.readiness.authenticated
-                    },
-                    textGeneration = VerificationState.PASS,
-                    vision = if (result.usedVision) VerificationState.PASS else currentState.readiness.vision,
-                    streaming = if (result.wasStreamed) VerificationState.PASS else currentState.readiness.streaming,
-                    tools = if (!result.turnMetadata?.toolCalls.isNullOrEmpty()) VerificationState.PASS else currentState.readiness.tools,
-                    lastVerifiedAtEpochMs = now,
-                    statusDetail = "Verified $verifiedFeatures on ${result.modelId}.$attachmentNote"
+                        ""
+                    }
+                    currentState.readiness.copy(
+                        configured = currentState.relayConfig.isConfigured &&
+                            credentialReady(currentState.relayConfig, currentState.hasToken),
+                        relayReachable = VerificationState.PASS,
+                        // A local loopback/emulator server (e.g. LM Studio) may ignore Authorization entirely, so its answer proves
+                        // reachability, not that a (placeholder) token was verified; keep the health result, as /v1/models does.
+                        authenticated = if (currentState.hasToken && !isLocalRelay(currentState.relayConfig)) {
+                            VerificationState.PASS
+                        } else {
+                            currentState.readiness.authenticated
+                        },
+                        textGeneration = VerificationState.PASS,
+                        vision = if (result.usedVision) VerificationState.PASS else currentState.readiness.vision,
+                        streaming = if (result.wasStreamed) VerificationState.PASS else currentState.readiness.streaming,
+                        tools = if (!result.turnMetadata?.toolCalls.isNullOrEmpty()) VerificationState.PASS else currentState.readiness.tools,
+                        lastVerifiedAtEpochMs = now,
+                        statusDetail = "Verified $verifiedFeatures on ${result.modelId}.$attachmentNote"
+                    )
+                }
+                is ChatDispatchResult.Failure -> updateReadinessForError(
+                    current = currentState.readiness,
+                    config = currentState.relayConfig,
+                    hasToken = currentState.hasToken,
+                    error = result.error,
+                    now = now
                 )
             }
-            is ChatDispatchResult.Failure -> updateReadinessForError(
-                current = currentState.readiness,
-                config = currentState.relayConfig,
-                hasToken = currentState.hasToken,
-                error = result.error,
-                now = now
-            )
-        }
-
-        _uiState.update {
-            it.copy(
-                isSending = false,
+            completedConversation = conversation
+            completedModelId = target.modelId
+            currentState.copy(
+                isSending = activeSendTarget != null && activeSendTarget != (conversationId to assistantMessageId),
                 conversations = updatedList,
                 readiness = updatedReadiness
             )
         }
+        val completed = completedConversation ?: return
+        conversationStore.saveConversations(_uiState.value.conversations)
         if (result is ChatDispatchResult.Failure) {
             recordError(
                 error = result.error,
-                config = currentState.relayConfig,
-                modelId = target?.modelId?.ifBlank { null } ?: currentState.relayConfig.modelId,
-                temporary = conversation.temporary
+                config = dispatchConfig,
+                modelId = completedModelId?.ifBlank { null } ?: dispatchConfig.modelId,
+                temporary = completed.temporary
             )
         }
     }
@@ -2871,7 +3029,8 @@ class ChatViewModel(
         createdAtEpochMs = now,
         updatedAtEpochMs = now,
         modelId = config.modelId,
-        route = config.route
+        route = config.route,
+        preferredConnection = ChatConnectionPreference.capture(config)
     )
 
     /**
@@ -2992,6 +3151,8 @@ class ChatViewModel(
     ): Boolean {
         if (uri.isNullOrBlank()) return false
         if (staged.any { it.localUri == uri }) return true
+        if (_uiState.value.draftBeforeEdit?.attachments.orEmpty().any { it.localUri == uri }) return true
+        if (_uiState.value.parkedDrafts.values.any { draft -> draft.attachments.any { it.localUri == uri } }) return true
         // Hidden versions count: flipping back to one must still find its files.
         return conversations.any { conv ->
             MessageVersions.everyMessage(conv.messages).any { msg ->

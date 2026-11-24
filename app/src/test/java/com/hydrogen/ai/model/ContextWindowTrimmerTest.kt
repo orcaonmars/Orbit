@@ -61,4 +61,25 @@ class ContextWindowTrimmerTest {
         assertEquals(ContextWindowTrimmer.LARGE_CONTEXT_BUDGET_CHARS, ContextWindowTrimmer.budgetFor(ProviderRoute.GOOGLE_AI_STUDIO_DIRECT))
         assertEquals(ContextWindowPolicy.DEFAULT_BUDGET_CHARS, ContextWindowTrimmer.budgetFor(ProviderRoute.GEMINI_HYDROGEN_RELAY))
     }
+    @Test
+    fun trimmingPreservesPositionOfRetainedSystemInstructions() {
+        val history = listOf(
+            msg("old", MessageRole.USER, 1000),
+            msg("u", MessageRole.USER, 100),
+            msg("s", MessageRole.SYSTEM, 50),
+            msg("a", MessageRole.ASSISTANT, 100),
+            msg("next", MessageRole.USER, 100)
+        )
+        assertEquals(listOf("u", "s", "a", "next"),
+            ContextWindowTrimmer.trim(history, "", emptySet(), 400).map { it.id })
+    }
+
+    @Test
+    fun currentRequestCanReincludePreviouslyOmittedAttachments() {
+        val old = msg("old", MessageRole.USER, 10, images = 1)
+        val omitted = old.copy(attachments = old.attachments.map { it.copy(omittedFromRemote = true) })
+        val history = listOf(omitted, msg("a", MessageRole.ASSISTANT, 10), msg("next", MessageRole.USER, 10))
+        assertEquals(listOf("next"), ContextWindowTrimmer.trim(history, "", emptyList(), 1000).map { it.id })
+        assertSame(history, ContextWindowTrimmer.trim(history, "", listOf("old-img0"), 1000))
+    }
 }

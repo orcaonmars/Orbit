@@ -18,7 +18,7 @@ object ConversationListTools {
 
     /** Every chat search can find: archived ones and project chats too, never a temporary or empty one. */
     fun searchable(conversations: List<Conversation>): List<Conversation> =
-        conversations.filter { !it.temporary && it.messages.isNotEmpty() }
+        conversations.filter { !it.temporary && it.messages.any { message -> message.role != MessageRole.SYSTEM } }
 
     /** Archived chats, newest first. */
     fun archived(conversations: List<Conversation>): List<Conversation> =
@@ -38,7 +38,7 @@ object ConversationListTools {
         if (needle.isEmpty()) return conversations
         return conversations.filter { conversation ->
             conversation.title.contains(needle, ignoreCase = true) ||
-                conversation.messages.any { messageMatches(it, needle) }
+                conversation.messages.any { it.role != MessageRole.SYSTEM && messageMatches(it, needle) }
         }
     }
 

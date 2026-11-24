@@ -69,7 +69,9 @@ data class RelayConfig(
     val streamingEnabled: Boolean = true,
     val rememberTokenInKeystore: Boolean = false,
     /** Google AI Studio only: let Gemini search the web (Google Search grounding) and cite its sources. */
-    val webSearchEnabled: Boolean = false
+    val webSearchEnabled: Boolean = false,
+    val reasoningMode: ReasoningMode = ReasoningMode.AUTO,
+    val openRouterReasoningModels: Set<String> = emptySet()
 ) {
     val effectiveBaseUrl: String
         get() = when (route) {
@@ -246,7 +248,8 @@ data class ChatMessage(
      */
     val otherVersions: List<MessageBranch> = emptyList(),
     /** Where this version sits among [otherVersions], from 0. */
-    val versionIndex: Int = 0
+    val versionIndex: Int = 0,
+    val requestProfile: ReplyRequestProfile? = null
 )
 
 @Serializable
@@ -270,5 +273,7 @@ data class Conversation(
      * A temporary chat lives only in memory: it is never written to storage or a backup, stays out of the chat list
      * and skips memory. Transient, so the flag itself can never be saved or read back from a file.
      */
-    @Transient val temporary: Boolean = false
+    @Transient val temporary: Boolean = false,
+    /** Device-local endpoint/model choice. Portable backups deliberately strip this field. */
+    val preferredConnection: ChatConnectionPreference? = null
 )

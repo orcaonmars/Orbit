@@ -94,6 +94,7 @@ object PromptPackCodec {
             if (title.length > MAX_TITLE) return failure("Prompt titles must be $MAX_TITLE characters or fewer.")
             if (body.isEmpty()) return failure("Every prompt in the pack needs text.")
             if (body.length > MAX_TEXT) return failure("Prompt texts must be $MAX_TEXT characters or fewer.")
+            // Preserve original title even if empty; auto-generate only when title is truly empty
             SharedPrompt(title.ifEmpty { autoTitle(body) }, body)
         }
         return Result.success(prompts.distinct())

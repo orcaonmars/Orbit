@@ -135,6 +135,12 @@ class ChatViewModelPersistenceAndRetryTest {
             val retriedMsg = vm.uiState.value.activeConversation!!.messages[1]
             assertEquals(MessageStatus.COMPLETED, retriedMsg.status)
             assertEquals("Recovered full reply", retriedMsg.content)
+            assertEquals("corr-1", retriedMsg.correlationId)
+            assertEquals("Partial answer", retriedMsg.otherVersions.single().messages.single().content)
+            assertEquals("Partial answer", store.loadConversations().first().messages[1].otherVersions.single().messages.single().content)
+            vm.showVersion(retriedMsg.id, 0)
+            advanceUntilIdle()
+            assertEquals("Partial answer", vm.uiState.value.activeConversation!!.messages[1].content)
             assertEquals(1, capturedAttachments.size)
         } finally {
             tempDir.deleteRecursively()
@@ -435,7 +441,7 @@ class ChatViewModelPersistenceAndRetryTest {
     }
 
     @Test
-    fun createNewConversationAndClearStagedAttachmentsDeleteUnreferencedLocalFiles() = runTest(testDispatcher) {
+    fun newChatParksAttachmentsAndClearDeletesUnreferencedLocalFiles() = runTest(testDispatcher) {
         val tempDir = Files.createTempDirectory("hydrogen-vm-clear-staged").toFile()
         try {
             val store: ConversationStore = FileConversationStore(tempDir, testDispatcher)
@@ -467,10 +473,15 @@ class ChatViewModelPersistenceAndRetryTest {
             assertTrue(vm.uiState.value.stagedAttachments.isEmpty())
             assertEquals(listOf("file:/tmp/one.png"), deletedUris)
 
+            val first = vm.uiState.value.activeConversationId!!
             vm.addStagedAttachment(AttachmentManifestItem("s2", "two.png", "image/png", 10L, "file:/tmp/two.png"))
             vm.createNewConversation()
             advanceUntilIdle()
             assertTrue(vm.uiState.value.stagedAttachments.isEmpty())
+            assertEquals(listOf("file:/tmp/one.png"), deletedUris)
+            vm.selectConversation(first)
+            assertEquals(listOf("s2"), vm.uiState.value.stagedAttachments.map { it.id })
+            vm.clearStagedAttachments()
             assertEquals(listOf("file:/tmp/one.png", "file:/tmp/two.png"), deletedUris)
         } finally {
             tempDir.deleteRecursively()

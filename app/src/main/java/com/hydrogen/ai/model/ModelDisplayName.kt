@@ -10,9 +10,9 @@ object ModelDisplayName {
     const val MAX_CHARS = 48
 
     fun of(modelId: String): String {
-        val trimmed = modelId.trim().trimEnd('/')
+        val trimmed = modelId.trim().trimEnd('/', '\\')
         if (trimmed.isEmpty()) return PLACEHOLDER
-        val lastSegment = trimmed.substringAfterLast('/').ifBlank { trimmed }
+        val lastSegment = trimmed.substringAfterLast('/').substringAfterLast('\\').ifBlank { trimmed }
         val withoutTag = lastSegment.removeSuffix(":latest").ifBlank { lastSegment }
         return cap(withoutTag)
     }
@@ -50,6 +50,28 @@ object ModelDisplayName {
             words.add(0, head)
         }
         return cap(words.joinToString(" "))
+    }
+
+    /**
+     * Compact label for places that already show the service, such as the composer's model chip: the friendly name
+     * without its leading family word when what is left still names the model ("Gemini 2.5 Flash" -> "2.5 Flash",
+     * "Claude Sonnet 4.5" -> "Sonnet 4.5"). Numbered or sized ids keep their family ("Gemma 4 26B A4B",
+     * "Qwen2.5 7B", "Llama 3.1 8B") because a leftover size alone would not say which model it is.
+     */
+    fun short(modelId: String): String {
+        val full = friendly(modelId)
+        if (full == PLACEHOLDER || full.endsWith("…")) return full
+        val words = full.split(' ')
+        if (words.size < 3) return full
+        val head = words.first()
+        // "GPT-4o", "Qwen2.5" and "o3" carry the model's name in the first word itself, so it stays.
+        if (head.isEmpty() || !head.all(Char::isLetter)) return full
+        val rest = words.drop(1)
+        // The shorthand has to keep naming the model: a version, or a variant word such as "Flash" or "Sonnet".
+        val versionLeads = rest.first().let { word -> word.any(Char::isLetter) || word.contains('.') }
+        val variantWord = rest.any { word -> word.none(Char::isDigit) && word.any(Char::isLetter) }
+        if (!versionLeads || !variantWord) return full
+        return cap(rest.joinToString(" "))
     }
 
     private fun formatToken(token: String): String {

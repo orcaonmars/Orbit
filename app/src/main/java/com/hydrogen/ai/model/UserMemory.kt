@@ -1,5 +1,6 @@
 package com.hydrogen.ai.model
 
+import java.text.Normalizer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -8,7 +9,12 @@ import kotlinx.serialization.json.Json
 data class MemoryItem(
     val id: String,
     val text: String,
-    val createdAt: Long
+    val createdAt: Long,
+    /**
+     * Pinned notes are shown before newer unpinned notes. Missing from older stored JSON,
+     * so those files simply decode as unpinned.
+     */
+    val pinned: Boolean = false
 )
 
 /**
@@ -16,10 +22,13 @@ data class MemoryItem(
  * Stored only on the device; it travels only inside the system prompt of the provider the user picked.
  */
 object UserMemory {
-    const val MAX_ITEMS = 50
+    const val MAX_ITEMS = 100
     const val MAX_ITEM_CHARS = 300
     const val MAX_BLOCK_CHARS = 3000
     const val HEADER = "Things the user asked you to remember:"
+
+    /** Two notes are treated as the same when they share more than this share of their words. */
+    private const val NEAR_DUPLICATE_OVERLAP = 0.8
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -27,18 +36,56 @@ object UserMemory {
     }
 
     private val prefixes = listOf("remember that ", "remember: ", "please remember ")
+    private val whitespace = Regex("\\s+")
+    private val combiningMarks = Regex("\\p{Mn}+")
+    private val wordSeparators = Regex("[^\\p{L}\\p{N}]+")
 
     /** Trims, collapses whitespace (including newlines) and clips to [MAX_ITEM_CHARS]. */
     fun clean(text: String): String =
-        text.replace(Regex("\\s+"), " ").trim().take(MAX_ITEM_CHARS).trim()
+        text.replace(whitespace, " ").trim().take(MAX_ITEM_CHARS).trim()
 
-    /** New items go first; blank text or a case-insensitive duplicate leaves the list unchanged. */
+    /** Lowercased words without accents or punctuation; used only for duplicate detection. */
+    private fun words(text: String): Set<String> =
+        combiningMarks
+            .replace(Normalizer.normalize(text.lowercase(), Normalizer.Form.NFD), "")
+            .replace("-", "")
+            .split(wordSeparators)
+            .filterTo(LinkedHashSet()) { it.isNotEmpty() }
+
+    /** Exact repeats (ignoring case, accents and punctuation) and near-identical word overlap. */
+    private fun isDuplicate(existing: String, candidate: String): Boolean {
+        val left = words(existing)
+        val right = words(candidate)
+        if (left.isEmpty() || right.isEmpty()) {
+            return clean(existing).equals(clean(candidate), ignoreCase = true)
+        }
+        val shared = left.count { it in right }
+        val union = left.size + right.size - shared
+        return shared.toDouble() / union > NEAR_DUPLICATE_OVERLAP
+    }
+
+    /**
+     * New items go first; blank text or a duplicate (case-insensitive or near-identical)
+     * leaves the list unchanged.
+     */
     fun add(items: List<MemoryItem>, text: String, id: String, now: Long): List<MemoryItem> {
         val cleaned = clean(text)
         if (cleaned.isEmpty()) return items
-        if (items.any { it.text.equals(cleaned, ignoreCase = true) }) return items
-        return (listOf(MemoryItem(id = id, text = cleaned, createdAt = now)) + items).take(MAX_ITEMS)
+        if (items.any { isDuplicate(it.text, cleaned) }) return items
+        return trimToCap(listOf(MemoryItem(id = id, text = cleaned, createdAt = now)) + items)
     }
+
+    /** Local, accent-insensitive note search. Never changes the saved list or prompt order. */
+    fun search(items: List<MemoryItem>, query: String): List<MemoryItem> {
+        fun fold(text: String): String =
+            combiningMarks.replace(Normalizer.normalize(text.lowercase(), Normalizer.Form.NFD), "")
+        val terms = fold(query).split(whitespace).filter { it.isNotEmpty() }
+        if (terms.isEmpty()) return items
+        return items.filter { item -> terms.all { it in fold(item.text) } }
+    }
+
+    fun setPinned(items: List<MemoryItem>, id: String, pinned: Boolean): List<MemoryItem> =
+        items.map { if (it.id == id) it.copy(pinned = pinned) else it }
 
     fun remove(items: List<MemoryItem>, id: String): List<MemoryItem> = items.filterNot { it.id == id }
 
@@ -46,16 +93,19 @@ object UserMemory {
     fun update(items: List<MemoryItem>, id: String, text: String): List<MemoryItem> {
         val cleaned = clean(text)
         if (cleaned.isEmpty()) return items
-        if (items.any { it.id != id && it.text.equals(cleaned, ignoreCase = true) }) return items
+        if (items.any { it.id != id && isDuplicate(it.text, cleaned) }) return items
         return items.map { if (it.id == id) it.copy(text = cleaned) else it }
     }
 
-    /** Null when empty; otherwise a bullet list, oldest first, that stays within [MAX_BLOCK_CHARS]. */
+    /**
+     * Null when empty; otherwise a bullet list, pinned notes first and then newest first,
+     * that stays within [MAX_BLOCK_CHARS].
+     */
     fun systemBlock(items: List<MemoryItem>): String? {
         if (items.isEmpty()) return null
         val builder = StringBuilder(HEADER)
         var added = 0
-        for (item in items.asReversed()) {
+        for (item in promptOrder(items)) {
             val line = "\n- " + item.text
             if (builder.length + line.length > MAX_BLOCK_CHARS) break
             builder.append(line)
@@ -63,6 +113,16 @@ object UserMemory {
         }
         return if (added == 0) null else builder.toString()
     }
+
+    /** Pinned notes first, then newest first; ties keep the stored (newest-first) order. */
+    private fun promptOrder(items: List<MemoryItem>): List<MemoryItem> =
+        items.withIndex()
+            .sortedWith(
+                compareByDescending<IndexedValue<MemoryItem>> { it.value.pinned }
+                    .thenByDescending { it.value.createdAt }
+                    .thenBy { it.index }
+            )
+            .map { it.value }
 
     /**
      * Combines the chat's own instructions with the memory block (memory first) into one system text.
@@ -114,14 +174,41 @@ object UserMemory {
         return rest.ifEmpty { null }
     }
 
-    fun encode(items: List<MemoryItem>): String = json.encodeToString(items.take(MAX_ITEMS))
+    fun encode(items: List<MemoryItem>): String = json.encodeToString(trimToCap(items))
 
-    /** Never throws: bad JSON gives an empty list; drops blank ids/texts and repeated ids. */
+    /**
+     * Never throws: bad JSON gives an empty list; drops invalid entries and repeated ids.
+     * Preserve existing distinct IDs even if their text overlaps: loading must not silently
+     * remove previously saved notes. Duplicate detection applies to new edits/additions.
+     */
     fun decode(text: String): List<MemoryItem> = runCatching {
-        json.decodeFromString<List<MemoryItem>>(text)
+        val parsed = json.decodeFromString<List<MemoryItem>>(text)
             .filter { it.id.isNotBlank() && it.text.isNotBlank() }
             .distinctBy { it.id }
             .map { it.copy(text = clean(it.text)) }
-            .take(MAX_ITEMS)
+            .filter { it.text.isNotEmpty() }
+        trimToCap(parsed)
     }.getOrDefault(emptyList())
+
+    /** Keeps [MAX_ITEMS]; drops the oldest unpinned notes first so pinned notes survive the cap. */
+    private fun trimToCap(items: List<MemoryItem>): List<MemoryItem> {
+        if (items.size <= MAX_ITEMS) return items
+        var toDrop = items.size - MAX_ITEMS
+        val dropped = BooleanArray(items.size)
+        for (index in items.indices.reversed()) {
+            if (toDrop == 0) break
+            if (!items[index].pinned) {
+                dropped[index] = true
+                toDrop--
+            }
+        }
+        for (index in items.indices.reversed()) {
+            if (toDrop == 0) break
+            if (!dropped[index]) {
+                dropped[index] = true
+                toDrop--
+            }
+        }
+        return items.filterIndexed { index, _ -> !dropped[index] }
+    }
 }

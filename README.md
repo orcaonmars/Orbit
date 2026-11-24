@@ -1,5 +1,7 @@
 # Orbit
 
+**Current release candidate: v0.3.0-alpha.** See the GitHub release notes for the changes and verification details.
+
 An Android chat app for AI models where you bring your own key, and nothing goes anywhere you didn't send it.
 
 I built this because I wanted one app on my phone that could talk to whatever model I felt like using that day,

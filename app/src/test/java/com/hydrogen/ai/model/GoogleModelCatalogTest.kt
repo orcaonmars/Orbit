@@ -42,4 +42,43 @@ class GoogleModelCatalogTest {
         assertTrue(GoogleModelCatalog.parse("""{"models": "nope"}""").isEmpty())
         assertTrue(GoogleModelCatalog.parse("""{"error": {"code": 403}}""").isEmpty())
     }
+
+    @Test
+    fun stableAliasesComeBeforeTheirPreviewsAndDatedBuilds() {
+        val body = """
+            {"models": [
+              {"name": "models/gemini-2.0-flash-001", "supportedGenerationMethods": ["generateContent"]},
+              {"name": "models/gemini-2.5-flash-preview-05-06", "supportedGenerationMethods": ["generateContent"]},
+              {"name": "models/gemini-2.0-flash", "supportedGenerationMethods": ["generateContent"]},
+              {"name": "models/gemini-2.5-pro-exp-03-25", "supportedGenerationMethods": ["generateContent"]},
+              {"name": "models/gemini-4-hydrogen", "supportedGenerationMethods": ["generateContent"]},
+              {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+              {"name": "models/gemini-2.5-pro", "supportedGenerationMethods": ["generateContent"]}
+            ]}
+        """.trimIndent()
+
+        val ids = GoogleModelCatalog.parse(body)
+        assertEquals("gemini-4-hydrogen", ids.first())
+        // Newest stable alias first, then the named previews, so the default one-tap pick is never an experiment.
+        assertEquals(
+            listOf(
+                "gemini-4-hydrogen",
+                "gemini-2.5-pro",
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
+                "gemini-2.5-pro-exp-03-25",
+                "gemini-2.5-flash-preview-05-06",
+                "gemini-2.0-flash-001"
+            ),
+            ids
+        )
+    }
+
+    @Test
+    fun builtInSuggestionsKeepTheDefaultFirstAndAreDistinct() {
+        val ids = GoogleModelCatalog.suggestions
+        assertEquals(HydrogenDefaults.PRIMARY_MODEL_ID, ids.first())
+        assertEquals(ids.distinct(), ids)
+        assertTrue(ids.drop(1).all { it.startsWith("gemini") && "embedding" !in it })
+    }
 }

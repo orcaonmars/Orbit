@@ -62,6 +62,28 @@ object NetworkErrorClassifier {
         )
     }
 
-    fun hostOf(baseUrl: String): String =
-        runCatching { java.net.URI(baseUrl.trim()).host }.getOrNull().orEmpty()
+    fun hostOf(baseUrl: String): String = runCatching { java.net.URI(baseUrl.trim()).host }.getOrNull().orEmpty()
+
+    /** Returns true if this IO error is likely retryable (network congestion, transient timeouts). */
+    fun isRetryable(e: IOException): Boolean = when (e) {
+        is UnknownHostException -> false
+        is SocketTimeoutException -> true
+        is SSLException -> false
+        is NoRouteToHostException -> false
+        is ConnectException -> false
+        else -> true
+    }
+
+    /** Categories for errors that may be retried safely before a response begins. */
+    enum class RetryCategory {
+        TIMEOUT,
+        OTHER
+    }
+
+    /** Non-retryable DNS, TLS, unreachable and refused failures return null. */
+    fun retryCategory(e: IOException): RetryCategory? = when {
+        !isRetryable(e) -> null
+        e is SocketTimeoutException -> RetryCategory.TIMEOUT
+        else -> RetryCategory.OTHER
+    }
 }

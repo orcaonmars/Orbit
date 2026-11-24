@@ -47,11 +47,11 @@ class SavedConnectionsTest {
         assertEquals(listOf("a", "b"), list.map { it.modelId })
         assertTrue("a key was needed once, so keep asking for it", list.first().needsKey)
         assertEquals(3L, list.first().lastUsedAtEpochMs)
-        repeat(20) { i ->
+        repeat(SavedConnections.MAX + 8) { i ->
             list = SavedConnections.remember(list, SavedConnections.from(relay("https://h$i.example.com", "m"), false, i.toLong())!!)
         }
         assertEquals(SavedConnections.MAX, list.size)
-        assertEquals("https://h19.example.com", list.first().baseUrl)
+        assertEquals("https://h${SavedConnections.MAX + 7}.example.com", list.first().baseUrl)
     }
 
     @Test
@@ -107,5 +107,22 @@ class SavedConnectionsTest {
             {"route":"GEMINI_HYDROGEN_RELAY","baseUrl":"http://10.0.2.2:1234","modelId":" "},
             {"route":"GEMINI_HYDROGEN_RELAY","baseUrl":"http://10.0.2.2:1234","modelId":"ok","future":true}]"""
         assertEquals(listOf("ok"), SavedConnections.decode(junk).map { it.modelId })
+    }
+
+    @Test fun favoritesAndReasoningSurviveRefreshAndEviction() {
+        val original = SavedConnections.from(relay("https://cleanapis.com", "opus").copy(reasoningMode = ReasoningMode.ULTRA), true, 1L)!!
+        var list = SavedConnections.setPinned(listOf(original), original, true)
+        list = SavedConnections.remember(list, original.copy(reasoningMode = ReasoningMode.HIGH, lastUsedAtEpochMs = 2L))
+        assertTrue(list.single().pinned)
+        assertEquals(ReasoningMode.HIGH, list.single().reasoningMode)
+        repeat(SavedConnections.MAX + 5) {
+            list = SavedConnections.remember(list, original.copy(modelId = "other-$it", pinned = false))
+        }
+        assertEquals(SavedConnections.MAX, list.size)
+        assertTrue(list.any { it.modelId == "opus" && it.pinned })
+        assertEquals(list, SavedConnections.decode(SavedConnections.encode(list)))
+        val old = SavedConnections.decode("""[{"route":"GEMINI_HYDROGEN_RELAY","baseUrl":"https://cleanapis.com","modelId":"old"}]""").single()
+        assertFalse(old.pinned)
+        assertEquals(ReasoningMode.AUTO, old.reasoningMode)
     }
 }

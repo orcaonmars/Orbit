@@ -434,7 +434,7 @@ object CodeHighlighter {
         c in '0'..'9' || c in 'a'..'f' || c in 'A'..'F'
 
     private fun isIdentStart(c: Char): Boolean =
-        c in 'a'..'z' || c in 'A'..'Z' || c == '_'
+        c in 'a'..'z' || c in 'A'..'Z' || c == '_' || c == '$'
 
     private fun isIdentPart(c: Char): Boolean =
         isIdentStart(c) || c in '0'..'9'

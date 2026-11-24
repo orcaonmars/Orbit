@@ -4,7 +4,7 @@ package com.hydrogen.ai.model
 enum class PresetGroup(val label: String) {
     HOSTED("Online services"),
     PC("On your PC"),
-    OTHER("Other")
+    OTHER("Custom providers")
 }
 
 /**
@@ -70,15 +70,28 @@ enum class ProviderPreset(
     ),
     OPENROUTER(
         title = "OpenRouter",
-        subtitle = "Hundreds of models with one key",
+        subtitle = "Free and paid models; :free variants need no prepaid credits",
         route = ProviderRoute.GEMINI_HYDROGEN_RELAY,
         baseUrlProvider = { "https://openrouter.ai/api" },
-        defaultModelId = "",
+        defaultModelId = "openrouter/free",
         keyLabel = "OpenRouter API key",
         keyRequired = true,
         showsBaseUrl = false,
         keyPage = "https://openrouter.ai/keys",
-        keyPrefixes = listOf("sk-or-")
+        keyPrefixes = listOf("sk-or-"),
+        suggestedModels = listOf("openrouter/free")
+    ),
+    CLEAN_APIS(
+        title = "Clean APIs",
+        subtitle = "CleanAPI: Claude, GPT and more with one key",
+        route = ProviderRoute.GEMINI_HYDROGEN_RELAY,
+        baseUrlProvider = { "https://cleanapis.com" },
+        defaultModelId = "",
+        keyLabel = "Clean APIs API key",
+        keyRequired = true,
+        showsBaseUrl = false,
+        keyPage = "https://cleanapis.com",
+        keyPrefixes = listOf("cc_")
     ),
     GROQ(
         title = "Groq",
@@ -295,6 +308,21 @@ enum class ProviderPreset(
 }
 
 object ProviderPresets {
+    /** The free router and :free variants don't need prepaid OpenRouter credits. */
+    fun isOpenRouterFreeModel(modelId: String): Boolean {
+        val id = modelId.trim()
+        return id == "openrouter/free" || id.endsWith(":free")
+    }
+
+    /** Make a safe zero-credit choice visible even when model listing includes paid models. */
+    fun openRouterModels(modelIds: List<String>, freeOnly: Boolean): List<String> =
+        if (freeOnly) {
+            (ProviderPreset.OPENROUTER.suggestedModels + modelIds.filter { isOpenRouterFreeModel(it) })
+                .distinct()
+        } else {
+            modelIds
+        }
+
     const val HYDROGEN_RELAY_EMULATOR_URL = "http://10.0.2.2:18757"
     const val HYDROGEN_RELAY_PORT_NUMBER = 18757
     private const val HYDROGEN_RELAY_PORT = ":18757"
@@ -305,6 +333,7 @@ object ProviderPresets {
         ProviderPreset.ANTHROPIC,
         ProviderPreset.OPENAI,
         ProviderPreset.OPENROUTER,
+        ProviderPreset.CLEAN_APIS,
         ProviderPreset.GROQ,
         ProviderPreset.MISTRAL
     )

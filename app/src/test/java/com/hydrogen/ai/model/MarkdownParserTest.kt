@@ -97,6 +97,31 @@ class MarkdownParserTest {
     }
 
     @Test
+    fun linksKeepBalancedParenthesesInTheUrl() {
+        val md = "Read [the wiki](https://en.wikipedia.org/wiki/Foo_(bar)) first."
+        val blocks = MarkdownParser.parse(md)
+        val spans = (blocks.single() as MdBlock.Paragraph).spans
+        assertEquals("Read the wiki first.", plain(spans))
+        assertEquals("https://en.wikipedia.org/wiki/Foo_(bar)", spans.first { it.text == "the wiki" }.url)
+    }
+
+    @Test
+    fun linksKeepNestedAndEscapedParentheses() {
+        val nested = MarkdownParser.parseInline("[a](https://example.com/x_(y_(z)))")
+        assertEquals("https://example.com/x_(y_(z))", nested.single().url)
+        val escaped = MarkdownParser.parseInline("[b](https://example.com/a\\)b)")
+        assertEquals("https://example.com/a)b", escaped.single().url)
+    }
+
+    @Test
+    fun unbalancedLinkParenthesesStayPlainText() {
+        val text = "see [x](https://example.com/(a now"
+        val spans = MarkdownParser.parseInline(text)
+        assertEquals(text, plain(spans))
+        assertTrue(spans.none { it.url != null })
+    }
+
+    @Test
     fun plainReplyRoundTripsAsOneParagraph() {
         val blocks = MarkdownParser.parse("Hello there.\nHow can I help?")
         assertEquals("Hello there.\nHow can I help?", plain((blocks.single() as MdBlock.Paragraph).spans))

@@ -69,7 +69,9 @@ object CodeFileName {
             else -> fallbackWithIndex(index)
         }
 
-        val safeBase = sanitizeBase(rawBase)
+        val sanitized = sanitizeBase(rawBase)
+        // Device names cannot be saved on Windows, even when a file extension is present.
+        val safeBase = if (isReservedDeviceName(sanitized)) fallbackWithIndex(index) else sanitized
         val candidate = if (ext.isEmpty()) safeBase else "$safeBase.$ext"
         return if (candidate.any { it in FORBIDDEN_CHARS }) {
             if (ext.isEmpty()) FALLBACK_BASE else "$FALLBACK_BASE.$ext"
@@ -77,6 +79,10 @@ object CodeFileName {
             candidate
         }
     }
+
+    private fun isReservedDeviceName(name: String): Boolean =
+        Regex("""^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$""")
+            .matches(name.substringBefore('.').uppercase(Locale.ROOT))
 
     private fun fallbackWithIndex(index: Int): String =
         if (index > 1) "$FALLBACK_BASE-$index" else FALLBACK_BASE

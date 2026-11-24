@@ -51,6 +51,10 @@ data class AppearancePrefs(
     }
 
     companion object {
+        /** Recover each malformed preference independently, preserving valid saved choices. */
+        internal fun parseStoredValues(themeMode: Any?, accent: Any?, pureBlack: Any?): AppearancePrefs =
+            parse(themeMode as? String, accent as? String, pureBlack as? Boolean ?: false)
+
         fun parse(themeMode: String?, accent: String?, pureBlack: Boolean): AppearancePrefs = AppearancePrefs(
             themeMode = ThemeMode.values().firstOrNull { it.name == themeMode } ?: ThemeMode.SYSTEM,
             accent = AccentId.fromStored(accent) ?: AccentId.SUN,

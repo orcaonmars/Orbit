@@ -167,7 +167,7 @@ class ContextWindowPolicyTest {
             budgetChars = 100,
             systemPromptChars = 500
         )
-        assertEquals(Plan(keepFromIndex = 0, droppedCount = 0, usedChars = 500, overBudget = false), emptyOverSystem)
+        assertEquals(Plan(keepFromIndex = 0, droppedCount = 0, usedChars = 500, overBudget = true), emptyOverSystem)
 
         val exactDefaultItems = listOf(
             Item(role = "user", chars = 1),

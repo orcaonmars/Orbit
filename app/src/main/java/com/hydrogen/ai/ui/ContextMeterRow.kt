@@ -46,12 +46,12 @@ fun ContextMeterRow(usage: ContextUsage?, modifier: Modifier = Modifier) {
         val scheme = MaterialTheme.colorScheme
         val orbit = OrbitTheme.colors
         val tint = when (level) {
-            ContextUsage.Level.TRIMMED -> scheme.error
+            ContextUsage.Level.TRIMMED, ContextUsage.Level.OVER_LIMIT -> scheme.error
             ContextUsage.Level.NEAR -> scheme.tertiary
             else -> orbit.accent
         }
         val progress by animateFloatAsState(
-            targetValue = if (level == ContextUsage.Level.TRIMMED) 1f else (usage?.fraction ?: 0f).coerceIn(0f, 1f),
+            targetValue = if (level == ContextUsage.Level.TRIMMED || level == ContextUsage.Level.OVER_LIMIT) 1f else (usage?.fraction ?: 0f).coerceIn(0f, 1f),
             label = "context-progress"
         )
         Row(

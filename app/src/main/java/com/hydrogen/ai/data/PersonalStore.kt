@@ -22,7 +22,6 @@ class InMemoryPersonalStore(private var profile: PersonalProfile = PersonalProfi
 /** JSON in [dir]/orbit_personal.json; an empty profile removes the file, and any half-written copy. */
 class FilePersonalStore(private val dir: File) : PersonalStore {
     private val file get() = File(dir, "orbit_personal.json")
-    private val tmp get() = File(dir, "orbit_personal.json.tmp")
 
     override suspend fun load(): PersonalProfile = withContext(Dispatchers.IO) {
         runCatching { if (file.exists()) Personal.decode(file.readText()) else PersonalProfile() }
@@ -33,19 +32,10 @@ class FilePersonalStore(private val dir: File) : PersonalStore {
         val cleaned = Personal.clean(profile)
         if (cleaned.isEmpty) {
             // Also the temp copy a save killed mid-way could leave, so "delete all" leaves nothing of you behind.
-            file.delete()
-            tmp.delete()
+            SafeFileReplace.deleteSnapshot(file)
             return@withContext
         }
-        dir.mkdirs()
-        tmp.writeText(Personal.encode(cleaned))
-        if (!tmp.renameTo(file)) {
-            file.delete()
-            if (!tmp.renameTo(file)) {
-                tmp.copyTo(file, overwrite = true)
-                tmp.delete()
-            }
-        }
+        SafeFileReplace.writeText(file, Personal.encode(cleaned))
         Unit
     }
 }

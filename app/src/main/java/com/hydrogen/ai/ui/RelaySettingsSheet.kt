@@ -43,6 +43,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.hydrogen.ai.R
+import com.hydrogen.ai.ui.components.OrbitSearchField
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalFocusManager
@@ -51,6 +54,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hydrogen.ai.data.MAX_BACKUP_KEYS
+import com.hydrogen.ai.ui.theme.OrbitTheme
 import com.hydrogen.ai.model.GoogleModelCatalog
 import com.hydrogen.ai.model.HydrogenDefaults
 import com.hydrogen.ai.model.LocalServerPresets
@@ -62,6 +66,7 @@ import com.hydrogen.ai.model.ProviderPresets
 import com.hydrogen.ai.model.ProviderReadiness
 import com.hydrogen.ai.model.ProviderRoute
 import com.hydrogen.ai.model.RelayConfig
+import com.hydrogen.ai.model.ReasoningMode
 import com.hydrogen.ai.model.VerificationState
 
 private const val GOOGLE_KEY_PAGE = "https://aistudio.google.com/apikey"
@@ -72,6 +77,7 @@ internal fun keyPageFor(preset: ProviderPreset): String? = when (preset) {
     ProviderPreset.ANTHROPIC -> "https://console.anthropic.com/settings/keys"
     ProviderPreset.OPENAI -> "https://platform.openai.com/api-keys"
     ProviderPreset.OPENROUTER -> "https://openrouter.ai/keys"
+    ProviderPreset.CLEAN_APIS -> "https://cleanapis.com"
     ProviderPreset.GROQ -> "https://console.groq.com/keys"
     ProviderPreset.MISTRAL -> "https://console.mistral.ai/api-keys"
     ProviderPreset.DEEPSEEK -> "https://platform.deepseek.com/api_keys"
@@ -105,7 +111,8 @@ fun RelaySettingsSheet(
         maxImages: Int,
         streamingEnabled: Boolean,
         rememberTokenInKeystore: Boolean,
-        webSearchEnabled: Boolean
+        webSearchEnabled: Boolean,
+        reasoningMode: ReasoningMode
     ) -> Unit,
     onCheckHealth: () -> Unit,
     onDeleteCredential: () -> Unit = {},
@@ -114,6 +121,7 @@ fun RelaySettingsSheet(
     onLoadModels: () -> Unit = {},
     /** Opens the sheet on this provider card (first-run setup); null keeps the saved provider. */
     initialPreset: ProviderPreset? = null,
+    startWithCatalog: Boolean = false,
     /** The PC's home Wi-Fi address (e.g. "192.168.1.20") from the Companion pairing; null hides the Wi-Fi choice. */
     pcWifiHost: String? = null,
     /** Masked backup keys for the saved service, in the order they are tried. */
@@ -146,12 +154,15 @@ fun RelaySettingsSheet(
     var streamingEnabled by remember(relayConfig) { mutableStateOf(relayConfig.streamingEnabled) }
     var rememberKey by remember(relayConfig) { mutableStateOf(relayConfig.rememberTokenInKeystore) }
     var webSearch by remember(relayConfig) { mutableStateOf(relayConfig.webSearchEnabled) }
+    var reasoningMode by remember(relayConfig) { mutableStateOf(relayConfig.reasoningMode) }
+    var openRouterFreeOnly by rememberSaveable { mutableStateOf(true) }
     var tokenInput by remember { mutableStateOf("") }
     var validationError by remember { mutableStateOf<String?>(null) }
     var showAdvanced by remember { mutableStateOf(false) }
     var providerSearch by rememberSaveable { mutableStateOf("") }
-    var showAllHosted by rememberSaveable { mutableStateOf(false) }
-    var showCatalog by rememberSaveable { mutableStateOf(!relayConfig.isConfigured) }
+    var modelSearch by rememberSaveable(preset) { mutableStateOf("") }
+    var showAllHosted by rememberSaveable { mutableStateOf(true) }
+    var showCatalog by rememberSaveable { mutableStateOf(startWithCatalog || !relayConfig.isConfigured) }
     var confirmDeleteCredential by remember { mutableStateOf(false) }
     var showBackups by remember { mutableStateOf(false) }
     var backupInput by remember { mutableStateOf("") }
@@ -171,11 +182,18 @@ fun RelaySettingsSheet(
         val isSaved = next == savedPreset
         baseUrl = if (isSaved) relayConfig.baseUrl else next.defaultBaseUrl
         modelId = if (isSaved) relayConfig.modelId else next.defaultModelId
+        reasoningMode = if (isSaved) relayConfig.reasoningMode else ReasoningMode.AUTO
     }
 
     LaunchedEffect(initialPreset) { initialPreset?.let { choose(it) } }
 
     fun persistDraftIfValid(requireModel: Boolean = true): Boolean {
+        if (preset == ProviderPreset.OPENROUTER && openRouterFreeOnly &&
+            modelId.isNotBlank() && !ProviderPresets.isOpenRouterFreeModel(modelId)
+        ) {
+            validationError = "Choose openrouter/free or a model ending in :free, or turn off Free models only."
+            return false
+        }
         ProviderPresets.validate(preset, baseUrl, modelId, requireModel)?.let {
             validationError = it
             return false
@@ -200,12 +218,15 @@ fun RelaySettingsSheet(
             imageLimit,
             streamingEnabled,
             rememberKey,
-            webSearch
+            webSearch,
+            reasoningMode.takeIf { it in reasoningOptions(preset.route, chosenUrl, modelId, relayConfig.openRouterReasoningModels) } ?: ReasoningMode.AUTO
         )
         tokenInput = ""
         return true
     }
 
+    val space = OrbitTheme.space
+    val shapes = OrbitTheme.shapes
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -215,9 +236,9 @@ fun RelaySettingsSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = space.xxl)
+                .padding(bottom = space.xxxl),
+            verticalArrangement = Arrangement.spacedBy(space.l)
         ) {
             Text("Models & API keys", style = MaterialTheme.typography.titleLarge)
             Text(
@@ -225,7 +246,27 @@ fun RelaySettingsSheet(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            ConnectionStatusRow(readiness = readiness, isCurrent = preset == savedPreset)
+            val draftUrl = if (preset.showsBaseUrl) ProviderPresets.normalizeBaseUrl(baseUrl) else preset.defaultBaseUrl
+            val draftOrigin = ProviderPresets.originOf(draftUrl)
+            val sameEndpoint = preset == savedPreset && draftOrigin != null && draftOrigin ==
+                ProviderPresets.originOf(relayConfig.effectiveBaseUrl)
+            val sameModel = modelId.trim() == relayConfig.modelId.trim()
+            val currentConnection = sameEndpoint && sameModel && tokenInput.isBlank()
+            ConnectionStatusRow(readiness = readiness, isCurrent = currentConnection)
+            Surface(
+                shape = shapes.m, color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(if (currentConnection && readiness.authenticated == VerificationState.PASS) "Connection checked" else "Connect in three steps",
+                        style = MaterialTheme.typography.titleSmall)
+                    Text("1. Choose a provider   2. Add a key   3. Pick a model",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (currentConnection && readiness.lastVerifiedAtEpochMs != null) readiness.statusDetail
+                        else "Load models to discover available IDs. Test connection before sending a message.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             Text(
                 text = "Selected: ${preset.title}" + when {
                     preset.showsBaseUrl && baseUrl.isNotBlank() -> " · ${ProviderPresets.normalizeBaseUrl(baseUrl)}"
@@ -237,14 +278,20 @@ fun RelaySettingsSheet(
             )
 
             if (showCatalog) {
-            SectionLabel("Choose a provider")
+            SectionLabel("Browse all providers")
+            TextButton(onClick = { providerSearch = ""; choose(ProviderPreset.CUSTOM) }) {
+                Text("Add custom provider (OpenAI-compatible)")
+            }
+            TextButton(onClick = { providerSearch = ""; choose(ProviderPreset.CUSTOM_ANTHROPIC) }) {
+                Text("Add custom provider (Anthropic-compatible)")
+            }
             OutlinedTextField(
                 value = providerSearch,
                 onValueChange = { providerSearch = it },
-                label = { Text("Find a service") },
+                label = { Text("Search providers") },
                 placeholder = { Text("Name, protocol or hostname") },
                 singleLine = true,
-                shape = RoundedCornerShape(12.dp),
+                shape = shapes.m,
                 modifier = Modifier.fillMaxWidth()
             )
             val groups = ProviderCatalog.grouped(providerSearch)
@@ -327,7 +374,7 @@ fun RelaySettingsSheet(
                 LocalServerPresets.isLocalServer(ProviderPresets.normalizeBaseUrl(baseUrl))
             val keyStatus = when {
                 onWifi -> "Not sent over Wi-Fi. Use a server with no key, or connect over USB."
-                preset == savedPreset && hasToken -> "Saved ($maskedTokenLabel). Leave blank to keep it."
+                sameEndpoint && hasToken -> "Saved ($maskedTokenLabel). Leave blank to keep it."
                 preset.keyRequired && !customOnPc -> "Got more than one? Paste them all, one per line. Extras become backups."
                 else -> "Optional for servers on this PC."
             }
@@ -359,9 +406,9 @@ fun RelaySettingsSheet(
                     onClick = { runCatching { uriHandler.openUri(page) } },
                     shape = RoundedCornerShape(24.dp),
                     modifier = Modifier.fillMaxWidth()
-                ) { Text("Get a ${preset.title} key") }
+                ) { Text("Get API key") }
             }
-            if (preset == savedPreset && hasToken) {
+            if (sameEndpoint && hasToken) {
                 if (confirmDeleteCredential) {
                     Text(
                         if (backupKeyLabels.isEmpty()) "Remove this service's saved key? Other service keys are left alone."
@@ -383,7 +430,7 @@ fun RelaySettingsSheet(
                     }
                 }
             }
-            if (preset == savedPreset && hasToken && !onWifi) {
+            if (sameEndpoint && hasToken && !onWifi) {
                 TextButton(onClick = { showBackups = !showBackups }) {
                     Text(
                         if (backupKeyLabels.isEmpty()) "Add backup keys"
@@ -442,14 +489,44 @@ fun RelaySettingsSheet(
             }
 
             SectionLabel("Model")
+            if (preset == ProviderPreset.OPENROUTER) {
+                FilterChip(
+                    selected = openRouterFreeOnly,
+                    onClick = {
+                        openRouterFreeOnly = !openRouterFreeOnly
+                        if (openRouterFreeOnly && !ProviderPresets.isOpenRouterFreeModel(modelId)) {
+                            modelId = ProviderPreset.OPENROUTER.defaultModelId
+                        }
+                        validationError = null
+                    },
+                    label = { Text("Free models only") }
+                )
+                Text(
+                    text = if (openRouterFreeOnly) {
+                        "No prepaid credits needed for :free models. Usage limits still apply."
+                    } else {
+                        "Paid models may require OpenRouter credits."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             OutlinedTextField(
                 value = modelId,
                 onValueChange = { modelId = it; validationError = null },
-                label = { Text("Model name") },
+                label = { Text("Model ID") },
+                supportingText = { Text("Select a model below, or paste its exact API ID.") },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             )
+            if (preset == ProviderPreset.OPENROUTER && modelList.modelIds.isEmpty()) {
+                ModelChoiceList(
+                    ids = ProviderPreset.OPENROUTER.suggestedModels,
+                    selectedId = modelId.trim(),
+                    onPick = { modelId = it; validationError = null }
+                )
+            }
             val isGoogle = preset == ProviderPreset.GOOGLE_GEMINI
             val listUrl = if (isGoogle) HydrogenDefaults.GOOGLE_AI_STUDIO_BASE_URL else ProviderPresets.normalizeBaseUrl(baseUrl)
             val listedForThisUrl = modelList.baseUrl == listUrl && !modelList.isLoading
@@ -465,6 +542,7 @@ fun RelaySettingsSheet(
                     Text(
                         when {
                             modelList.isLoading -> "Loading models…"
+                            preset == ProviderPreset.OPENROUTER -> "Browse public models (no key needed)"
                             isGoogle -> "Load all models for this key"
                             else -> "Load models from server"
                         }
@@ -473,20 +551,40 @@ fun RelaySettingsSheet(
                 if (listedForThisUrl) {
                     modelList.message?.let { message ->
                         Text(
-                            text = message,
+                            text = if (preset == ProviderPreset.OPENROUTER && modelList.modelIds.isNotEmpty()) "$message Public catalog; actual access depends on your key and provider limits." else message,
                             style = MaterialTheme.typography.bodySmall,
                             color = if (modelList.modelIds.isEmpty()) MaterialTheme.colorScheme.error
                             else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    val displayedModelIds = if (preset == ProviderPreset.OPENROUTER) {
+                        ProviderPresets.openRouterModels(modelList.modelIds, openRouterFreeOnly)
+                    } else {
+                        modelList.modelIds
+                    }
+                    if (preset == ProviderPreset.OPENROUTER && openRouterFreeOnly && modelList.modelIds.isNotEmpty()) {
+                        Text("${displayedModelIds.size} free options shown. Other models are hidden.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (com.hydrogen.ai.model.ModelCatalogSearch.shouldShowSearch(displayedModelIds.size, MAX_MODEL_CHOICES, modelSearch)) {
+                        OrbitSearchField(
+                            value = modelSearch, onValueChange = { modelSearch = it },
+                            label = stringResource(R.string.model_catalog_search),
+                            clearDescription = stringResource(R.string.switcher_clear_search)
+                        )
+                    }
+                    val matches = com.hydrogen.ai.model.ModelCatalogSearch.filter(displayedModelIds, modelSearch)
+                    if (matches.isEmpty() && modelSearch.isNotBlank()) {
+                        Text("No matching models. Try a shorter name.", style = MaterialTheme.typography.bodySmall)
+                    }
                     ModelChoiceList(
-                        ids = modelList.modelIds.take(MAX_MODEL_CHOICES),
+                        ids = matches.take(MAX_MODEL_CHOICES),
                         selectedId = modelId.trim(),
-                        onPick = { modelId = it }
+                        onPick = { modelId = it; validationError = null }
                     )
-                    if (modelList.modelIds.size > MAX_MODEL_CHOICES) {
+                    if (matches.size > MAX_MODEL_CHOICES) {
                         Text(
-                            text = "Showing $MAX_MODEL_CHOICES of ${modelList.modelIds.size}; type any other name above.",
+                            text = "Showing $MAX_MODEL_CHOICES of ${matches.size} matching models. Search to narrow the list.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -507,6 +605,27 @@ fun RelaySettingsSheet(
                     )
                 }
             }
+            val availableModes = reasoningOptions(preset.route, if (preset.showsBaseUrl) baseUrl else preset.defaultBaseUrl, modelId, relayConfig.openRouterReasoningModels)
+            val supportsEffort = availableModes.size > 1
+            val effectiveMode = reasoningMode.takeIf { it in availableModes } ?: ReasoningMode.AUTO
+            val cleanApisBudget = com.hydrogen.ai.model.ReasoningPolicy.isCleanApis(if (preset.showsBaseUrl) baseUrl else preset.defaultBaseUrl)
+            Text(if (cleanApisBudget) "Reasoning / response token budget" else "Reasoning effort", style = MaterialTheme.typography.titleSmall)
+            if (!supportsEffort) {
+                Text("This model does not have a known effort control. It uses its own reasoning defaults.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                ReasoningMode.entries.chunked(2).forEach { modes ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        modes.forEach { mode ->
+                            FilterChip(selected = effectiveMode == mode, enabled = mode in availableModes, onClick = { reasoningMode = mode },
+                                label = { Text(if (cleanApisBudget && mode != ReasoningMode.AUTO) "${mode.label}: ${com.hydrogen.ai.model.ReasoningPolicy.cleanApisBudget(if (preset.showsBaseUrl) baseUrl else preset.defaultBaseUrl, mode)}" else mode.label) }, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+            if (supportsEffort && cleanApisBudget) Text("Clean APIs controls total completion tokens, including reasoning and answer. Higher limits do not guarantee deeper thinking and may be rejected by the upstream model.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (supportsEffort && !cleanApisBudget) Text("Automatic uses model defaults. Higher effort can increase latency and token usage. Unsupported levels are disabled. On OpenRouter, the upstream model may map the requested effort to its nearest supported level.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Button(
                 onClick = { if (persistDraftIfValid()) onDismiss() },
                 shape = RoundedCornerShape(24.dp),
@@ -704,10 +823,11 @@ private fun ConnectionStatusRow(readiness: ProviderReadiness, isCurrent: Boolean
         readiness.textGeneration == VerificationState.FAIL
     val verified = readiness.relayReachable == VerificationState.PASS && !failed
     val (color, label) = when {
-        !isCurrent -> MaterialTheme.colorScheme.onSurfaceVariant to "New provider: save, then test."
+        !isCurrent -> MaterialTheme.colorScheme.onSurfaceVariant to "Connection changed. Save or test to apply."
         !readiness.configured -> Color(0xFFE8A317) to "Not set up yet"
         failed -> MaterialTheme.colorScheme.error to "Connection problem"
-        verified -> MaterialTheme.colorScheme.tertiary to "Connected"
+        verified && readiness.authenticated == VerificationState.PASS -> MaterialTheme.colorScheme.tertiary to "Key accepted"
+        verified -> MaterialTheme.colorScheme.tertiary to "Server reachable"
         else -> MaterialTheme.colorScheme.onSurfaceVariant to "Saved, not tested yet"
     }
     Surface(

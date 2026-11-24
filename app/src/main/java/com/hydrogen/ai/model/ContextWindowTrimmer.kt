@@ -23,18 +23,25 @@ object ContextWindowTrimmer {
         val (systemMessages, turns) = messages.partition { it.role == MessageRole.SYSTEM }
         if (turns.isEmpty()) return messages
         val reserved = systemPrompt.length.toLong() + systemMessages.sumOf { it.content.length.toLong() }
+        val omitted = omittedAttachmentIds.toHashSet()
         val plan = ContextWindowPolicy.plan(
             items = turns.map { msg ->
                 ContextWindowPolicy.Item(
                     role = msg.role.name.lowercase(),
                     chars = msg.content.length,
-                    imageCount = msg.attachments.count { it.id !in omittedAttachmentIds }
+                    imageCount = msg.attachments.count { it.id !in omitted }
                 )
             },
             budgetChars = budgetChars,
             systemPromptChars = reserved.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         )
         if (plan.droppedCount == 0) return messages
-        return systemMessages + turns.drop(plan.keepFromIndex)
+        var remainingToDrop = plan.droppedCount
+        return messages.filter { message ->
+            if (message.role == MessageRole.SYSTEM || remainingToDrop == 0) true else {
+                remainingToDrop--
+                false
+            }
+        }
     }
 }

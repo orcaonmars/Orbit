@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LocalContentColor
@@ -18,9 +17,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.hydrogen.ai.ui.theme.OrbitTheme
-
-private val MenuShape = RoundedCornerShape(18.dp)
-private val ItemShape = RoundedCornerShape(12.dp)
 
 /**
  * Orbit's pop-up menu: a rounded floating card with a soft shadow and a hairline edge, roomier than the stock
@@ -35,12 +31,13 @@ fun OrbitMenu(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val colors = OrbitTheme.colors
+    val space = OrbitTheme.space
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest,
-        modifier = modifier.widthIn(min = 220.dp).padding(horizontal = 6.dp),
+        modifier = modifier.widthIn(min = 220.dp).padding(horizontal = space.s),
         offset = offset,
-        shape = MenuShape,
+        shape = OrbitTheme.shapes.l,
         containerColor = colors.surface2,
         tonalElevation = 0.dp,
         shadowElevation = 12.dp,
@@ -60,15 +57,16 @@ fun OrbitMenuItem(
     enabled: Boolean = true
 ) {
     val colors = OrbitTheme.colors
+    val space = OrbitTheme.space
     CompositionLocalProvider(LocalContentColor provides colors.text) {
         DropdownMenuItem(
             text = {
                 CompositionLocalProvider(LocalContentColor provides colors.text) {
-                    androidx.compose.material3.ProvideTextStyle(MaterialTheme.typography.bodyMedium) { text() }
+                    androidx.compose.material3.ProvideTextStyle(OrbitTheme.type.bodyMedium) { text() }
                 }
             },
             onClick = onClick,
-            modifier = modifier.clip(ItemShape),
+            modifier = modifier.clip(OrbitTheme.shapes.m),
             leadingIcon = leadingIcon,
             trailingIcon = trailingIcon,
             enabled = enabled,
@@ -77,7 +75,7 @@ fun OrbitMenuItem(
                 leadingIconColor = colors.muted,
                 trailingIconColor = colors.muted
             ),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp)
+            contentPadding = PaddingValues(horizontal = space.l, vertical = space.xs)
         )
     }
 }

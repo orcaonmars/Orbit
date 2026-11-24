@@ -144,7 +144,8 @@ class HttpGoogleAiStudioBackend(
         val isGemma = isGemmaModel(model)
         // Gemma models on AI Studio reject the Google Search tool; only ask Gemini models to search.
         val webSearch = config.webSearchEnabled && !isGemma
-        val payloadBuild = buildPayload(request, webSearch, instructionsInFirstUserTurn = isGemma)
+        val payloadBuild = buildPayload(request, webSearch, instructionsInFirstUserTurn = isGemma,
+            thinkingLevel = com.hydrogen.ai.model.ReasoningPolicy.googleLevel(model, config.reasoningMode))
         if (payloadBuild.error != null) {
             return@withContext ChatDispatchResult.Failure(payloadBuild.error)
         }
@@ -220,7 +221,8 @@ class HttpGoogleAiStudioBackend(
     internal suspend fun buildPayload(
         request: ChatDispatchRequest,
         webSearch: Boolean = false,
-        instructionsInFirstUserTurn: Boolean = false
+        instructionsInFirstUserTurn: Boolean = false,
+        thinkingLevel: String? = null
     ): PayloadBuildResult {
         var usedVision = false
         val systemTexts = mutableListOf<String>()
@@ -322,6 +324,11 @@ class HttpGoogleAiStudioBackend(
                 )
             }
             put("contents", JsonArray(contents))
+            if (thinkingLevel != null) {
+                put("generationConfig", buildJsonObject {
+                    put("thinkingConfig", buildJsonObject { put("thinkingLevel", thinkingLevel) })
+                })
+            }
             if (webSearch) {
                 put("tools", buildJsonArray { add(buildJsonObject { put("google_search", buildJsonObject {}) }) })
             }

@@ -304,16 +304,60 @@ object MarkdownParser {
     private fun parseLink(text: String, start: Int): Triple<String, String, Int>? {
         val labelEnd = text.indexOf(']', start + 1)
         if (labelEnd <= start + 1 || labelEnd + 1 >= text.length || text[labelEnd + 1] != '(') return null
-        val urlEnd = text.indexOf(')', labelEnd + 2)
+        // Wikipedia-style URLs contain balanced parentheses: https://en.wikipedia.org/wiki/Foo_(bar).
+        // Stop only at the ')' that closes the destination, so the link is not cut short mid-URL.
+        val urlEnd = closingParen(text, labelEnd + 2) ?: return null
         if (urlEnd <= labelEnd + 2) return null
-        val url = text.substring(labelEnd + 2, urlEnd).trim()
+        val url = unescapeParens(text.substring(labelEnd + 2, urlEnd).trim())
         if (url.any { it.isWhitespace() }) return null
         return Triple(text.substring(start + 1, labelEnd), url, urlEnd + 1)
     }
 
+    /** `\(` / `\)` in a destination are Markdown escapes for the literal characters. */
+    private fun unescapeParens(url: String): String {
+        if ('\\' !in url) return url
+        val out = StringBuilder(url.length)
+        var i = 0
+        while (i < url.length) {
+            val c = url[i]
+            if (c == '\\' && i + 1 < url.length && (url[i + 1] == '(' || url[i + 1] == ')')) {
+                out.append(url[i + 1])
+                i += 2
+            } else {
+                out.append(c)
+                i++
+            }
+        }
+        return out.toString()
+    }
+
+    /** Index of the `)` that closes the destination opened at [from] - 1, honouring nesting and `\)`. */
+    private fun closingParen(text: String, from: Int): Int? {
+        var depth = 1
+        var i = from
+        while (i < text.length) {
+            when (text[i]) {
+                '\\' -> i += 2
+                '(' -> {
+                    depth++
+                    i++
+                }
+                ')' -> {
+                    depth--
+                    if (depth == 0) return i
+                    i++
+                }
+                else -> i++
+            }
+        }
+        return null
+    }
+
     /** Only plain web links are made clickable; never javascript:, intent:, file: or content:. */
     fun isSafeUrl(url: String): Boolean {
-        val lower = url.lowercase()
-        return (lower.startsWith("https://") || lower.startsWith("http://")) && lower.length > 8
+        val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return false
+        if (!uri.scheme.equals("https", ignoreCase = true) && !uri.scheme.equals("http", ignoreCase = true)) return false
+        // A clickable destination needs an actual host, not a bare scheme or misleading user-info prefix.
+        return !uri.host.isNullOrBlank() && uri.rawUserInfo == null && (uri.port == -1 || uri.port in 1..65535)
     }
 }

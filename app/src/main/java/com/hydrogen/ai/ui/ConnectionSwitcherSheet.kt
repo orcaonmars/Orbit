@@ -16,14 +16,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Cloud
-import androidx.compose.material.icons.outlined.Computer
-import androidx.compose.material.icons.outlined.Key
-import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -31,9 +23,18 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.res.stringResource
+import com.hydrogen.ai.R
+import com.hydrogen.ai.ui.components.OrbitSearchField
+import com.hydrogen.ai.ui.components.OrbitListRow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import com.hydrogen.ai.model.LocalServerPresets
 import com.hydrogen.ai.model.ModelDisplayName
 import com.hydrogen.ai.model.ProviderRoute
+import com.hydrogen.ai.model.ProviderPresets
 import com.hydrogen.ai.model.RelayConfig
 import com.hydrogen.ai.model.SavedConnection
 import com.hydrogen.ai.model.SavedConnections
@@ -67,14 +69,22 @@ fun ConnectionSwitcherSheet(
     onSwitch: (SavedConnection) -> Unit,
     onRemove: (SavedConnection) -> Unit,
     onRename: (SavedConnection) -> Unit,
+    onPin: (SavedConnection) -> Unit,
     onOpenSettings: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val haptics = LocalHapticFeedback.current
     val orbit = OrbitTheme.colors
+    val space = OrbitTheme.space
+    var query by rememberSaveable { mutableStateOf("") }
+    var selectedServer by rememberSaveable { mutableStateOf<String?>(null) }
     val groups = remember(connections) { groupByServer(connections) }
+    val chosen = groups.firstOrNull { it.first == selectedServer }
+    val searchable = chosen?.second ?: connections
+    val matches = remember(searchable, query) { searchConnections(searchable, query) }
+    val goBack = { selectedServer = null; query = "" }
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (chosen != null) goBack() else onDismiss() },
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
@@ -82,11 +92,11 @@ fun ConnectionSwitcherSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 24.dp)
+                .padding(horizontal = space.l)
+                .padding(bottom = space.xxl)
         ) {
             Text(
-                "Switch model",
+                chosen?.first ?: stringResource(R.string.switcher_title),
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier
                     .padding(horizontal = 4.dp)
@@ -97,32 +107,12 @@ fun ConnectionSwitcherSheet(
                 if (connections.isEmpty()) {
                     "Models you chat with show up here, so you can go back to any of them in one tap."
                 } else {
-                    "Recently used. Keys are never copied between servers."
+                    stringResource(R.string.switcher_subtitle)
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = orbit.muted,
                 modifier = Modifier.padding(horizontal = 4.dp)
             )
-            groups.forEach { (server, models) ->
-                val first = models.first()
-                val local = first.route != ProviderRoute.GOOGLE_AI_STUDIO_DIRECT &&
-                    LocalServerPresets.isPrivateServer(first.baseUrl)
-                ServerLabel(server = server, local = local)
-                models.forEach { connection ->
-                    val selected = SavedConnections.isCurrent(connection, current)
-                    ModelRow(
-                        connection = connection,
-                        selected = selected,
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            if (!selected) onSwitch(connection)
-                            onDismiss()
-                        },
-                        onRemove = if (selected) null else ({ onRemove(connection) }),
-                        onRename = { onRename(connection) }
-                    )
-                }
-            }
             Spacer(Modifier.height(12.dp))
             HorizontalDivider(thickness = 1.dp, color = orbit.line)
             Spacer(Modifier.height(4.dp))
@@ -135,10 +125,81 @@ fun ConnectionSwitcherSheet(
                     .heightIn(min = 48.dp)
                     .padding(horizontal = 12.dp)
             ) {
-                Icon(Icons.Outlined.Tune, contentDescription = null, tint = orbit.muted, modifier = Modifier.size(18.dp))
+                Icon(OrbitIcons.Tune, contentDescription = null, tint = orbit.muted, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(12.dp))
-                Text("Manage connections", style = MaterialTheme.typography.bodyMedium, color = orbit.text)
+                Text("Add / manage providers", style = MaterialTheme.typography.bodyMedium, color = orbit.text)
             }
+            if (chosen != null) {
+                TextButton(onClick = goBack) { Text(stringResource(R.string.switcher_back_services)) }
+            }
+            if (searchable.isNotEmpty() || query.isNotEmpty()) {
+                Spacer(Modifier.height(space.m))
+                OrbitSearchField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = stringResource(R.string.switcher_search),
+                    clearDescription = stringResource(R.string.switcher_clear_search)
+                )
+            }
+            if (searchable.isNotEmpty() && matches.isEmpty()) {
+                Text(
+                    stringResource(R.string.switcher_no_matches),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = orbit.muted,
+                    modifier = Modifier.padding(vertical = space.xxl, horizontal = space.xs)
+                )
+            }
+            val showModels: @Composable (List<SavedConnection>) -> Unit = { models ->
+                models.forEach { connection ->
+                    val selected = SavedConnections.isCurrent(connection, current)
+                    ModelRow(
+                        connection = connection,
+                        selected = selected,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            if (!selected) onSwitch(connection)
+                            onDismiss()
+                        },
+                        onRemove = if (selected) null else ({ onRemove(connection) }),
+                        onRename = { onRename(connection) },
+                        onPin = { onPin(connection) }
+                    )
+                }
+            }
+            if (chosen != null) {
+                showModels(matches)
+            } else if (query.isNotBlank()) {
+                // Global model search still groups results by their actual service.
+                groups.forEach { (server, models) ->
+                    val found = models.filter { it in matches }
+                    if (found.isNotEmpty()) {
+                        ServerLabel(server, isLocalConnection(found.first()))
+                        showModels(found)
+                    }
+                }
+            } else if (connections.isNotEmpty()) {
+                val favorites = connections.filter { it.pinned }
+                if (favorites.isNotEmpty()) {
+                    Text("Favorites", style = MaterialTheme.typography.labelMedium, color = orbit.muted,
+                        modifier = Modifier.padding(top = space.l, bottom = space.xs))
+                    showModels(favorites)
+                }
+                Text(stringResource(R.string.switcher_recent), style = MaterialTheme.typography.labelMedium,
+                    color = orbit.muted, modifier = Modifier.padding(top = space.l, bottom = space.xs))
+                showModels(connections.filterNot { it.pinned }.take(3))
+                Text(stringResource(R.string.switcher_services), style = MaterialTheme.typography.labelMedium,
+                    color = orbit.muted, modifier = Modifier.padding(top = space.l, bottom = space.xs))
+                groups.forEach { (server, models) ->
+                    val first = models.first()
+                    OrbitListRow(
+                        title = server,
+                        subtitle = stringResource(R.string.switcher_saved_count, models.size),
+                        leadingIcon = if (isLocalConnection(first)) OrbitIcons.Computer else OrbitIcons.Cloud,
+                        onClick = { selectedServer = server; query = "" }
+                    )
+                }
+            }
+
         }
     }
 }
@@ -147,8 +208,43 @@ fun ConnectionSwitcherSheet(
  * Saved connections grouped by the server they run on. Servers keep the order of their most recently used model and
  * models keep their order inside a server, so the list still reads most recent first.
  */
-internal fun groupByServer(connections: List<SavedConnection>): List<Pair<String, List<SavedConnection>>> =
-    connections.groupBy { SavedConnections.serverLabel(it) }.toList()
+internal fun searchConnections(connections: List<SavedConnection>, query: String): List<SavedConnection> {
+    fun fold(value: String): String = value.lowercase().replace(Regex("[\\s_-]+"), " ").trim()
+    val terms = fold(query).split(' ').filter { it.isNotEmpty() }
+    if (terms.isEmpty()) return connections
+    return connections.filter { connection ->
+        val haystack = fold(listOf(
+            connection.label,
+            connection.modelId,
+            ModelDisplayName.friendly(connection.modelId),
+            SavedConnections.serverLabel(connection)
+        ).joinToString(" "))
+        terms.all { it in haystack }
+    }
+}
+
+/** Group by actual route and endpoint, not a display hostname that could conceal separate services. */
+internal fun groupByServer(connections: List<SavedConnection>): List<Pair<String, List<SavedConnection>>> {
+    val endpoints = connections.groupBy { connection ->
+        connection.route to if (connection.route == ProviderRoute.GOOGLE_AI_STUDIO_DIRECT) {
+            "google-direct"
+        } else ProviderPresets.normalizeBaseUrl(connection.baseUrl)
+    }.values.toList()
+    val labels = endpoints.map { SavedConnections.serverLabel(it.first()) }
+    val labelCounts = labels.groupingBy { it }.eachCount()
+    val seen = mutableMapOf<String, Int>()
+    return endpoints.mapIndexed { index, models ->
+        val label = labels[index]
+        val occurrence = (seen[label] ?: 0) + 1
+        seen[label] = occurrence
+        val distinctLabel = if ((labelCounts[label] ?: 0) > 1) "$label ($occurrence)" else label
+        distinctLabel to models
+    }
+}
+
+private fun isLocalConnection(connection: SavedConnection): Boolean =
+    connection.route != ProviderRoute.GOOGLE_AI_STUDIO_DIRECT &&
+        LocalServerPresets.isPrivateServer(connection.baseUrl)
 
 @Composable
 private fun ServerLabel(server: String, local: Boolean) {
@@ -161,8 +257,8 @@ private fun ServerLabel(server: String, local: Boolean) {
             .semantics(mergeDescendants = true) { heading() }
     ) {
         Icon(
-            if (local) Icons.Outlined.Computer else Icons.Outlined.Cloud,
-            contentDescription = if (local) "On your network" else "Online",
+            if (local) OrbitIcons.Computer else OrbitIcons.Cloud,
+            contentDescription = if (local) "On your network" else "Remote server",
             tint = orbit.faint,
             modifier = Modifier.size(14.dp)
         )
@@ -183,10 +279,11 @@ private fun ModelRow(
     selected: Boolean,
     onClick: () -> Unit,
     onRemove: (() -> Unit)?,
-    onRename: () -> Unit
+    onRename: () -> Unit,
+    onPin: () -> Unit
 ) {
     val orbit = OrbitTheme.colors
-    val name = ModelDisplayName.of(connection.modelId)
+    val name = ModelDisplayName.friendly(connection.modelId)
     // The sheet sits on the sidebar color. In Paper, surface-2 is within a shade of it, so the selected row uses the
     // lighter surface there; in Night and Midnight surface-2 is the step up.
     val selectedBand = if (orbit.dark) orbit.surface2 else orbit.surface
@@ -200,7 +297,7 @@ private fun ModelRow(
             .heightIn(min = 48.dp)
             .padding(start = 12.dp)
     ) {
-        Column(modifier = Modifier.weight(1f, fill = false)) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 connection.label.ifBlank { name },
                 style = MaterialTheme.typography.bodyMedium,
@@ -209,27 +306,34 @@ private fun ModelRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            if (connection.label.isNotBlank()) {
-                Text(name, style = MaterialTheme.typography.labelSmall,
-                    color = orbit.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+            val detail = listOfNotNull(
+                name.takeIf { connection.label.isNotBlank() },
+                connection.reasoningMode.label.takeIf { connection.reasoningMode != com.hydrogen.ai.model.ReasoningMode.AUTO }
+            ).joinToString(" / ")
+            if (detail.isNotBlank()) Text(detail, style = MaterialTheme.typography.labelSmall,
+                color = orbit.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (connection.needsKey) {
             Spacer(Modifier.width(8.dp))
-            Icon(Icons.Outlined.Key, contentDescription = "Uses a key", tint = orbit.faint, modifier = Modifier.size(14.dp))
+            Icon(OrbitIcons.Key, contentDescription = "Uses a key", tint = orbit.faint, modifier = Modifier.size(14.dp))
         }
-        Spacer(Modifier.weight(1f))
+        Spacer(Modifier.width(OrbitTheme.space.s))
         if (selected) {
-            Icon(Icons.Default.Check, contentDescription = "In use", tint = orbit.accent,
+            Icon(OrbitIcons.Check, contentDescription = "In use", tint = orbit.accent,
                 modifier = Modifier.size(18.dp))
         }
+        IconButton(onClick = onPin) {
+            Icon(if (connection.pinned) OrbitIcons.StarFilled else OrbitIcons.StarOutline,
+                contentDescription = if (connection.pinned) "Remove $name from favorites" else "Favorite $name",
+                tint = if (connection.pinned) orbit.accent else orbit.muted, modifier = Modifier.size(18.dp))
+        }
         IconButton(onClick = onRename) {
-            Icon(Icons.Outlined.Edit, contentDescription = "Rename $name", tint = orbit.muted,
+            Icon(OrbitIcons.Edit, contentDescription = "Rename $name", tint = orbit.muted,
                 modifier = Modifier.size(18.dp))
         }
         if (!selected && onRemove != null) {
             IconButton(onClick = onRemove) {
-                Icon(Icons.Outlined.Close, contentDescription = "Forget $name", tint = orbit.faint,
+                Icon(OrbitIcons.Close, contentDescription = "Forget $name", tint = orbit.faint,
                     modifier = Modifier.size(18.dp))
             }
         }

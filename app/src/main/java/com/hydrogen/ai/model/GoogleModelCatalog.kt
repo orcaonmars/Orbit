@@ -19,7 +19,8 @@ object GoogleModelCatalog {
 
     /**
      * Parses a `GET /v1beta/models` body into chat-capable ids ("models/x" -> "x"): Gemini 4 Hydrogen first,
-     * then other Gemini models newest first, then everything else. Malformed input yields an empty list.
+     * then other Gemini models newest first with a stable alias ahead of its previews and dated builds, then
+     * everything else. Malformed input yields an empty list.
      */
     fun parse(body: String): List<String> {
         val models = runCatching { json.parseToJsonElement(body).jsonObject["models"]?.jsonArray }.getOrNull()
@@ -38,7 +39,14 @@ object GoogleModelCatalog {
         }.distinct()
         return ids.sortedWith(
             compareBy<String> { if (it == HydrogenDefaults.PRIMARY_MODEL_ID) 0 else if (it.startsWith("gemini")) 1 else 2 }
+                // A stable alias is the one to pick by default; named previews and dated builds follow it.
+                .thenBy { if (isPreviewBuild(it)) 1 else 0 }
                 .thenByDescending { it }
         )
     }
+
+    /** Preview aliases ("-preview-05-06", "-exp") and dated builds ("-001", "-20241022") are not the stable one. */
+    private fun isPreviewBuild(id: String): Boolean = PREVIEW_BUILD.containsMatchIn(id)
+
+    private val PREVIEW_BUILD = Regex("""-preview(?:-|$)|-exp(?:-|$)|-(?:\d{3,4}|\d{8})$""")
 }

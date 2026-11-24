@@ -42,6 +42,10 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hydrogen.ai.R
+import androidx.compose.ui.res.stringResource
+import com.hydrogen.ai.ui.components.OrbitSearchField
+import com.hydrogen.ai.ui.theme.OrbitTheme
 import com.hydrogen.ai.model.MemoryItem
 import com.hydrogen.ai.model.UserMemory
 
@@ -58,15 +62,19 @@ fun MemorySheet(
     onAdd: (String) -> Boolean,
     onUpdate: (id: String, text: String) -> Boolean,
     onRemove: (String) -> Unit,
+    onSetPinned: (String, Boolean) -> Unit,
     onClearAll: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var query by remember { mutableStateOf("") }
     var newText by remember { mutableStateOf("") }
     var addError by remember { mutableStateOf<String?>(null) }
     var editingId by remember { mutableStateOf<String?>(null) }
     var editText by remember { mutableStateOf("") }
     var editError by remember { mutableStateOf<String?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
+    val visible = remember(items, query, editingId) { UserMemory.search(items, query).let { matches -> items.filter { it in matches || it.id == editingId } } }
+    val space = OrbitTheme.space
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -77,8 +85,8 @@ fun MemorySheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 28.dp),
+                .padding(horizontal = space.xl)
+                .padding(bottom = space.xxxl),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text("Memory", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
@@ -159,7 +167,18 @@ fun MemorySheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            items.forEach { item ->
+            if (items.size >= 4 || query.isNotEmpty()) {
+                OrbitSearchField(
+                    value = query,
+                    onValueChange = { query = it },
+                    label = stringResource(R.string.memory_search),
+                    clearDescription = stringResource(R.string.memory_clear_search)
+                )
+            }
+            if (items.isNotEmpty() && visible.isEmpty()) {
+                Text(stringResource(R.string.memory_no_matches), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            visible.sortedByDescending { it.pinned }.forEach { item ->
                 Surface(
                     shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -196,6 +215,7 @@ fun MemorySheet(
                             }
                         }
                     } else {
+                        Column(modifier = Modifier.fillMaxWidth()) {
                         Row(
                             modifier = Modifier.padding(start = 14.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
@@ -212,14 +232,18 @@ fun MemorySheet(
                                 editText = item.text
                                 editError = null
                             }) {
-                                Icon(Icons.Outlined.Edit, contentDescription = "Edit note: ${item.text.take(40)}")
+                                Icon(OrbitIcons.Edit, contentDescription = "Edit note: ${item.text.take(40)}")
                             }
                             IconButton(onClick = {
                                 if (editingId == item.id) editingId = null
                                 onRemove(item.id)
                             }) {
-                                Icon(Icons.Outlined.Delete, contentDescription = "Delete note: ${item.text.take(40)}")
+                                Icon(OrbitIcons.Delete, contentDescription = "Delete note: ${item.text.take(40)}")
                             }
+                        }
+                        TextButton(onClick = { onSetPinned(item.id, !item.pinned) }, modifier = Modifier.padding(horizontal = space.s)) {
+                            Text(stringResource(if (item.pinned) R.string.memory_unpin else R.string.memory_pin))
+                        }
                         }
                     }
                 }

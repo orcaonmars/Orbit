@@ -177,7 +177,11 @@ class SharedPrefsRelayConfigStore(context: Context) : RelayConfigStore {
             maxImagesPerRequest = maxImages.coerceIn(1, 32),
             streamingEnabled = streamingEnabled,
             rememberTokenInKeystore = rememberInKeystore,
-            webSearchEnabled = prefs.getBoolean(KEY_WEB_SEARCH, false)
+            webSearchEnabled = prefs.getBoolean(KEY_WEB_SEARCH, false),
+            reasoningMode = com.hydrogen.ai.model.ReasoningMode.fromStored(runCatching { prefs.getString("reasoning_mode", null) }.getOrNull()),
+            openRouterReasoningModels = if (com.hydrogen.ai.model.ReasoningPolicy.isOpenRouter(baseUrl))
+                runCatching { prefs.getStringSet("openrouter_reasoning_models", emptySet())?.toSet().orEmpty() }.getOrDefault(emptySet())
+                else emptySet()
         )
     }
 
@@ -191,6 +195,8 @@ class SharedPrefsRelayConfigStore(context: Context) : RelayConfigStore {
             .putBoolean(KEY_STREAMING_ENABLED, config.streamingEnabled)
             .putBoolean(KEY_REMEMBER_TOKEN, config.rememberTokenInKeystore)
             .putBoolean(KEY_WEB_SEARCH, config.webSearchEnabled)
+            .putString("reasoning_mode", config.reasoningMode.name)
+            .putStringSet("openrouter_reasoning_models", config.openRouterReasoningModels.take(2000).toSet())
             .apply()
     }
 

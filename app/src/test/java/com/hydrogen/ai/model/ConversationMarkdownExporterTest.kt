@@ -102,4 +102,32 @@ class ConversationMarkdownExporterTest {
         assertTrue(md.endsWith("first question\n"))
         assertEquals("", ConversationMarkdownExporter.exportAll(listOf(empty)))
     }
+
+    @Test fun exportOmitsHiddenSystemAndPcActionPayloads() {
+        val conv = Conversation(id = "x", title = "Public chat", createdAtEpochMs = 1L,
+            updatedAtEpochMs = 2L, messages = listOf(
+                msg("s", MessageRole.SYSTEM, "PRIVATE SYSTEM PROMPT"),
+                msg("u", MessageRole.USER, "Explain <pdf> literally"),
+                msg("a", MessageRole.ASSISTANT, "Visible answer.\n\n```orbit-pc\nPRIVATE ACTION\n```\n\n<pdf>Document text</pdf>")
+            ))
+        val result = ConversationMarkdownExporter.export(conv)
+        assertFalse(result.contains("PRIVATE SYSTEM PROMPT"))
+        assertFalse(result.contains("PRIVATE ACTION"))
+        assertTrue(result.contains("Visible answer."))
+        assertTrue(result.contains("Document text"))
+        assertTrue(result.contains("Explain <pdf> literally"))
+        assertFalse(result.contains("<pdf>Document"))
+        assertTrue(ConversationMarkdownExporter.export(conv.copy(temporary = true)).contains("Visible answer."))
+        assertEquals("", ConversationMarkdownExporter.exportAll(listOf(conv.copy(temporary = true))))
+        assertEquals("", ConversationMarkdownExporter.exportAll(listOf(conv.copy(messages = conv.messages.take(1)))))
+    }
+
+    @Test fun metadataCannotInjectMarkdownImagesOrRawHtml() {
+        val conv = Conversation(id = "x", title = "![pixel](https://example.test) <img>",
+            createdAtEpochMs = 1L, updatedAtEpochMs = 2L, messages = listOf(msg("u", MessageRole.USER, "Text")))
+        val result = ConversationMarkdownExporter.export(conv)
+        assertFalse(result.contains("<img>"))
+        assertTrue(result.contains("&lt;img&gt;"))
+        assertTrue(result.contains("\\!\\[pixel\\]"))
+    }
 }

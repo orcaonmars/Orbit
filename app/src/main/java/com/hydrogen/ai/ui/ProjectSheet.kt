@@ -5,6 +5,13 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.res.stringResource
+import com.hydrogen.ai.R
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,8 +27,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material3.AlertDialog
@@ -33,6 +38,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -59,10 +65,12 @@ import androidx.compose.ui.unit.dp
 import com.hydrogen.ai.data.DocumentImporter
 import com.hydrogen.ai.data.TextReadResult
 import com.hydrogen.ai.model.Project
+import com.hydrogen.ai.model.ProjectImportBudget
 import com.hydrogen.ai.model.Projects
 import com.hydrogen.ai.ui.theme.OrbitTheme
 import java.text.NumberFormat
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 /** Copy for the project sheet, kept together so it reads as one voice. */
 internal object ProjectCopy {
@@ -155,40 +163,90 @@ fun ProjectSheet(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     // Keyed on the id, so the fields fill in when a just-created project opens here.
-    var name by remember(project?.id) { mutableStateOf(project?.name.orEmpty()) }
-    var instructions by remember(project?.id) { mutableStateOf(project?.instructions.orEmpty()) }
-    var reading by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
+    var name by rememberSaveable(project?.id) { mutableStateOf(project?.name.orEmpty()) }
+    var instructions by rememberSaveable(project?.id) { mutableStateOf(project?.instructions.orEmpty()) }
+    var reading by remember(project?.id) { mutableStateOf(false) }
+    var pickerTargetId by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirmDiscard by remember(project?.id) { mutableStateOf(false) }
+    var confirmDelete by remember(project?.id) { mutableStateOf(false) }
     val nameOk = Projects.normalizeName(name) != null
     val changed = project != null &&
         (Projects.normalizeName(name) != project.name || Projects.cleanInstructions(instructions) != project.instructions)
 
     val saveAndClose: () -> Unit = {
-        if (project != null && changed && nameOk) onSave(project.id, name, instructions)
-        onDismiss()
+        if (reading) {
+            Toast.makeText(context, R.string.project_import_in_progress, Toast.LENGTH_SHORT).show()
+        } else if ((project == null && (name.isNotBlank() || instructions.isNotBlank())) ||
+            (project != null && changed && !nameOk)) {
+            confirmDiscard = true
+        } else {
+            if (project != null && changed && nameOk) onSave(project.id, name, instructions)
+            onDismiss()
+        }
     }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
+        val targetId = pickerTargetId
+        pickerTargetId = null
         val target = project ?: return@rememberLauncherForActivityResult
-        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        if (targetId != target.id || uris.isEmpty()) return@rememberLauncherForActivityResult
         reading = true
         scope.launch {
             val problems = mutableListOf<String>()
-            var full = false
-            for (uri in uris) {
-                when (val r = importer.readText(context, uri)) {
-                    is TextReadResult.Ok -> if (!onAddFile(target.id, r.displayName, r.text, r.truncated)) full = true
-                    is TextReadResult.Failure -> problems += r.reason
+            val budget = ProjectImportBudget(target.files.size, Projects.MAX_FILES)
+            val uniqueUris = uris.distinct()
+            try {
+                for (uri in uniqueUris) {
+                    if (!budget.beginRead()) break
+                    when (val r = importer.readText(context, uri)) {
+                        is TextReadResult.Ok -> {
+                            if (r.text.isBlank()) {
+                                problems += context.getString(R.string.project_file_empty)
+                            } else if (onAddFile(target.id, r.displayName, r.text, r.truncated)) {
+                                budget.recordAdded()
+                            } else {
+                                problems += context.getString(R.string.project_file_add_failed)
+                            }
+                        }
+                        is TextReadResult.Failure -> problems += r.reason
+                    }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                problems += context.getString(R.string.project_file_add_failed)
+            } finally {
+                reading = false
             }
-            reading = false
-            val message = when {
-                full -> "A project holds up to ${Projects.MAX_FILES} files. Remove one to add another."
-                problems.isNotEmpty() -> problems.first()
-                else -> null
-            }
-            message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+            val unprocessed = uniqueUris.size - budget.attempted
+            val summary = buildList {
+                add(context.getString(R.string.project_import_added, budget.added))
+                if (problems.isNotEmpty()) add(context.getString(R.string.project_import_failed_count, problems.size, problems.first()))
+                if (unprocessed > 0) {
+                    add(context.getString(
+                        if (budget.full) R.string.project_import_full_count else R.string.project_import_unprocessed_count,
+                        unprocessed
+                    ))
+                }
+            }.joinToString("\n")
+            Toast.makeText(context, summary, Toast.LENGTH_LONG).show()
         }
+    }
+
+    if (confirmDiscard) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscard = false },
+            title = { Text(stringResource(R.string.project_discard_title)) },
+            text = { Text(stringResource(R.string.project_discard_body)) },
+            confirmButton = {
+                TextButton(onClick = { confirmDiscard = false; onDismiss() }) {
+                    Text(stringResource(R.string.project_discard))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDiscard = false }) { Text(stringResource(R.string.project_keep_editing)) }
+            }
+        )
     }
 
     if (confirmDelete && project != null) {
@@ -217,7 +275,18 @@ fun ProjectSheet(
 
     ModalBottomSheet(
         onDismissRequest = saveAndClose,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = rememberModalBottomSheetState(
+            skipPartiallyExpanded = true,
+            confirmValueChange = { next ->
+                if (next != SheetValue.Hidden) true
+                else if (reading) false
+                else if ((project == null && (name.isNotBlank() || instructions.isNotBlank())) ||
+                    (project != null && changed && !nameOk)) {
+                    confirmDiscard = true
+                    false
+                } else true
+            }
+        ),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow
     ) {
         Column(
@@ -271,7 +340,10 @@ fun ProjectSheet(
                 ProjectFilesSection(
                     project = project,
                     reading = reading,
-                    onAdd = { picker.launch(arrayOf("*/*")) },
+                    onAdd = {
+                        pickerTargetId = project.id
+                        picker.launch(arrayOf("*/*"))
+                    },
                     onRemove = { fileId -> onRemoveFile(project.id, fileId) }
                 )
             }
@@ -283,7 +355,7 @@ fun ProjectSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (project != null) {
-                    TextButton(onClick = { confirmDelete = true }) {
+                    TextButton(onClick = { confirmDelete = true }, enabled = !reading) {
                         Text(ProjectCopy.DELETE, color = MaterialTheme.colorScheme.error)
                     }
                 }
@@ -291,7 +363,7 @@ fun ProjectSheet(
                 if (project == null) {
                     Button(onClick = { onCreate(name, instructions) }, enabled = nameOk) { Text(ProjectCopy.CREATE) }
                 } else {
-                    Button(onClick = saveAndClose, enabled = nameOk) { Text(ProjectCopy.DONE) }
+                    Button(onClick = saveAndClose, enabled = nameOk && !reading) { Text(ProjectCopy.DONE) }
                 }
             }
         }
@@ -318,7 +390,7 @@ private fun ProjectFilesSection(
             CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
         } else {
             TextButton(onClick = onAdd, enabled = project.files.size < Projects.MAX_FILES) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(OrbitIcons.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.size(6.dp))
                 Text(ProjectCopy.ADD_FILES)
             }
@@ -332,12 +404,42 @@ private fun ProjectFilesSection(
         )
         return
     }
-    val used = Projects.filesChars(project)
+    val entries = remember(project.files) { Projects.fileContext(project) }
+    val used = entries.sumOf { it.sentChars }
+    val stored = entries.sumOf { it.storedChars }
     val budget = Projects.FILES_BUDGET_CHARS
+    var previewId by rememberSaveable(project.id) { mutableStateOf<String?>(null) }
+    val preview = entries.firstOrNull { it.file.id == previewId }
+    if (preview != null) {
+        AlertDialog(
+            onDismissRequest = { previewId = null },
+            title = { Text(preview.file.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        stringResource(R.string.project_file_context_count, numbers.format(preview.sentChars), numbers.format(preview.storedChars)),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (preview.file.truncated) {
+                        Text(stringResource(R.string.project_file_import_truncated), style = MaterialTheme.typography.bodySmall)
+                    }
+                    SelectionContainer {
+                        Text(
+                            preview.file.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { previewId = null }) { Text(ProjectCopy.DONE) } }
+        )
+    }
     // A plain meter: a visible track, no gap and no end dot, so a nearly empty project reads as "nearly empty".
     LinearProgressIndicator(
         progress = { (used.toFloat() / budget).coerceIn(0f, 1f) },
-        color = if (used > budget) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        color = if (stored > used) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
         trackColor = MaterialTheme.colorScheme.outlineVariant,
         strokeCap = StrokeCap.Round,
         gapSize = 0.dp,
@@ -348,15 +450,16 @@ private fun ProjectFilesSection(
             .clip(RoundedCornerShape(3.dp))
     )
     Text(
-        if (used > budget) {
-            "${numbers.format(used)} characters. Orbit sends the first ${numbers.format(budget)} with each message, so the end of the last files is left out."
+        if (stored > used) {
+            stringResource(R.string.project_context_partial, numbers.format(used), numbers.format(stored))
         } else {
-            "${numbers.format(used)} of ${numbers.format(budget)} characters, sent with each message in this project."
+            stringResource(R.string.project_context_full, numbers.format(used), numbers.format(budget))
         },
         style = MaterialTheme.typography.bodySmall,
-        color = if (used > budget) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+        color = if (stored > used) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
     )
-    project.files.forEach { file ->
+    entries.forEach { entry ->
+        val file = entry.file
         Surface(
             shape = RoundedCornerShape(12.dp),
             color = MaterialTheme.colorScheme.surface,
@@ -375,7 +478,8 @@ private fun ProjectFilesSection(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .padding(horizontal = 12.dp)
+                        .clickable(role = Role.Button, onClickLabel = stringResource(R.string.project_open_file)) { previewId = file.id }
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
                 ) {
                     Text(
                         file.name,
@@ -384,14 +488,17 @@ private fun ProjectFilesSection(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        "${numbers.format(file.text.length)} characters" +
-                            if (file.truncated) ", only the beginning was kept" else "",
+                        when {
+                            entry.omitted -> stringResource(R.string.project_file_omitted)
+                            entry.partial -> stringResource(R.string.project_file_context_count, numbers.format(entry.sentChars), numbers.format(entry.storedChars))
+                            else -> stringResource(R.string.project_file_included, numbers.format(entry.sentChars))
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                IconButton(onClick = { onRemove(file.id) }) {
-                    Icon(Icons.Default.Close, contentDescription = "Remove ${file.name}", modifier = Modifier.size(18.dp))
+                IconButton(onClick = { onRemove(file.id) }, enabled = !reading) {
+                    Icon(OrbitIcons.Close, contentDescription = "Remove ${file.name}", modifier = Modifier.size(18.dp))
                 }
             }
         }

@@ -1,12 +1,14 @@
 package com.hydrogen.ai.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UserMemoryTest {
-    private fun item(id: String, text: String, at: Long = 0) = MemoryItem(id, text, at)
+    private fun item(id: String, text: String, at: Long = 0, pinned: Boolean = false) =
+        MemoryItem(id, text, at, pinned)
 
     @Test
     fun addPutsNewItemFirstAndCleansWhitespace() {
@@ -14,6 +16,7 @@ class UserMemoryTest {
         assertEquals(listOf("b", "a"), list.map { it.id })
         assertEquals("I am vegetarian", list.first().text)
         assertEquals(5L, list.first().createdAt)
+        assertFalse(list.first().pinned)
     }
 
     @Test
@@ -21,6 +24,19 @@ class UserMemoryTest {
         val start = listOf(item("a", "I write Kotlin"))
         assertEquals(start, UserMemory.add(start, "   ", "b", 1))
         assertEquals(start, UserMemory.add(start, "i WRITE kotlin", "b", 1))
+    }
+
+    @Test
+    fun addSkipsNearIdenticalNotesButKeepsDistinctOnes() {
+        val start = listOf(item("a", "I really like dark mode"))
+        // Five of six words are shared (> 0.8), so this is the same fact restated.
+        assertEquals(start, UserMemory.add(start, "I really like dark mode theme", "b", 2))
+        // Accents, punctuation and case do not create a second note.
+        val cafe = listOf(item("a", "I like café"))
+        assertEquals(cafe, UserMemory.add(cafe, "i like CAFE!", "b", 2))
+        // Four of six words shared stays below the threshold: a genuinely different note.
+        val more = UserMemory.add(start, "I really like light mode", "b", 2)
+        assertEquals(listOf("b", "a"), more.map { it.id })
     }
 
     @Test
@@ -35,6 +51,22 @@ class UserMemoryTest {
     }
 
     @Test
+    fun addDropsOldestUnpinnedNoteSoPinnedOnesSurviveTheCap() {
+        var list = emptyList<MemoryItem>()
+        for (i in 0 until UserMemory.MAX_ITEMS) list = UserMemory.add(list, "note $i", "id$i", i.toLong())
+        val oldestIndex = list.lastIndex
+        assertFalse(list.last().pinned)
+        list = list.mapIndexed { index, it -> if (index == oldestIndex) it.copy(pinned = true) else it }
+
+        val after = UserMemory.add(list, "fresh note", "fresh", 1_000)
+
+        assertEquals(UserMemory.MAX_ITEMS, after.size)
+        assertEquals("fresh", after.first().id)
+        assertTrue(after.any { it.id == "id0" }) // pinned oldest kept
+        assertTrue(after.none { it.id == "id1" }) // next-oldest unpinned dropped
+    }
+
+    @Test
     fun removeAndUpdate() {
         val start = listOf(item("a", "one"), item("b", "two"))
         assertEquals(listOf("b"), UserMemory.remove(start, "a").map { it.id })
@@ -45,14 +77,36 @@ class UserMemoryTest {
     }
 
     @Test
-    fun systemBlockIsOldestFirstAndBounded() {
+    fun updateRejectsNearDuplicateOfAnotherNoteAndKeepsPinned() {
+        val start = listOf(item("a", "I really like dark mode"), item("b", "I drink tea"))
+        assertEquals(start, UserMemory.update(start, "b", "I really like dark mode theme"))
+        val pinned = listOf(item("a", "one", pinned = true))
+        assertTrue(UserMemory.update(pinned, "a", "uno").single().pinned)
+    }
+
+    @Test
+    fun systemBlockIsPinnedFirstThenNewestAndBounded() {
         assertNull(UserMemory.systemBlock(emptyList()))
-        val block = UserMemory.systemBlock(listOf(item("b", "newer"), item("a", "older")))
-        assertEquals("${UserMemory.HEADER}\n- older\n- newer", block)
-        val many = (0 until UserMemory.MAX_ITEMS).map { item("i$it", "y".repeat(UserMemory.MAX_ITEM_CHARS)) }
-        val big = UserMemory.systemBlock(many)!!
+        val items = listOf(
+            item("new", "newest", at = 30),
+            item("pinOld", "pinned older", at = 10, pinned = true),
+            item("old", "oldest", at = 10),
+            item("pinNew", "pinned newer", at = 20, pinned = true)
+        )
+        assertEquals(
+            "${UserMemory.HEADER}\n- pinned newer\n- pinned older\n- newest\n- oldest",
+            UserMemory.systemBlock(items)
+        )
+        val many = (0 until UserMemory.MAX_ITEMS).map {
+            item("i$it", "$it" + "y".repeat(UserMemory.MAX_ITEM_CHARS - 2), at = it.toLong())
+        }
+        // The oldest note is pinned, so it must still fit inside the block cap.
+        val withPinnedOldest = many.mapIndexed { index, it -> if (index == 0) it.copy(pinned = true) else it }
+        val big = UserMemory.systemBlock(withPinnedOldest)!!
         assertTrue(big.length <= UserMemory.MAX_BLOCK_CHARS)
         assertTrue(big.startsWith(UserMemory.HEADER))
+        assertTrue(big.contains("\n- 0"))
+        assertFalse(big.contains("\n- 50"))
     }
 
     @Test
@@ -99,11 +153,24 @@ class UserMemoryTest {
 
     @Test
     fun encodeDecodeRoundTripAndBadInput() {
-        val list = listOf(item("a", "one", 1), item("b", "two", 2))
+        val list = listOf(item("a", "one", 1, pinned = true), item("b", "two", 2))
         assertEquals(list, UserMemory.decode(UserMemory.encode(list)))
         assertEquals(emptyList<MemoryItem>(), UserMemory.decode("not json"))
         val messy = """[{"id":"a","text":"x","createdAt":1},{"id":"a","text":"dup","createdAt":2},
             {"id":"","text":"y","createdAt":3},{"id":"c","text":"  ","createdAt":4},{"id":"d","text":"z","createdAt":5,"extra":1}]"""
         assertEquals(listOf("a", "d"), UserMemory.decode(messy).map { it.id })
+    }
+
+    @Test
+    fun decodeReadsLegacyJsonWithoutPinnedAndPreservesDistinctSavedIds() {
+        val legacy = """[{"id":"a","text":"I live in Toronto","createdAt":1}]"""
+        assertEquals(listOf(item("a", "I live in Toronto", 1)), UserMemory.decode(legacy))
+
+        val pinnedThenRestated = """[{"id":"a","text":"Pinned note","createdAt":1,"pinned":true},
+            {"id":"b","text":"Pinned Note!","createdAt":2},{"id":"c","text":"Other","createdAt":3}]"""
+        val decoded = UserMemory.decode(pinnedThenRestated)
+        assertEquals(listOf("a", "b", "c"), decoded.map { it.id })
+        assertEquals(decoded, UserMemory.decode(UserMemory.encode(decoded)))
+        assertTrue(decoded.first().pinned)
     }
 }

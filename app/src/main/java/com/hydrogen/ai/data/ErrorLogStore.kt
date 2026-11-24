@@ -22,7 +22,6 @@ class InMemoryErrorLogStore(private var entries: List<ErrorLogEntry> = emptyList
 /** JSON in [dir]/orbit_error_log.json; an empty log removes the file and any half-written copy. */
 class FileErrorLogStore(private val dir: File) : ErrorLogStore {
     private val file get() = File(dir, "orbit_error_log.json")
-    private val tmp get() = File(dir, "orbit_error_log.json.tmp")
 
     override suspend fun load(): List<ErrorLogEntry> = withContext(Dispatchers.IO) {
         runCatching { if (file.exists()) ErrorLog.decode(file.readText()) else emptyList() }.getOrDefault(emptyList())
@@ -30,19 +29,10 @@ class FileErrorLogStore(private val dir: File) : ErrorLogStore {
 
     override suspend fun save(entries: List<ErrorLogEntry>) = withContext(Dispatchers.IO) {
         if (entries.isEmpty()) {
-            file.delete()
-            tmp.delete()
+            SafeFileReplace.deleteSnapshot(file)
             return@withContext
         }
-        dir.mkdirs()
-        tmp.writeText(ErrorLog.encode(entries))
-        if (!tmp.renameTo(file)) {
-            file.delete()
-            if (!tmp.renameTo(file)) {
-                tmp.copyTo(file, overwrite = true)
-                tmp.delete()
-            }
-        }
+        SafeFileReplace.writeText(file, ErrorLog.encode(entries))
         Unit
     }
 }

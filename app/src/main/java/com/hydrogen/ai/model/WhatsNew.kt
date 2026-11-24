@@ -9,15 +9,15 @@ package com.hydrogen.ai.model
 object WhatsNew {
     data class Item(val title: String, val body: String)
 
-    const val TITLE = "What's new in Orbit 0.2.1"
+    const val TITLE = "What's new in Orbit 0.3"
     const val SUBTITLE = "Your chats, notes and settings came with you."
     const val DONE = "Start chatting"
 
     val ITEMS: List<Item> = listOf(
-        Item("More keys per service", "Paste up to ten keys, one per line. When one hits its limit, Orbit moves to the next."),
-        Item("Easier key setup", "A Paste button and a link to get a key for each service."),
-        Item("Softer menus", "Rounded menus with more room to tap."),
-        Item("Steadier replies", "Fixed a crash when a reply finished very fast.")
+        Item("Cleaner chats", "Find text in conversations, navigate saved prompts, and use compact reply controls."),
+        Item("More model controls", "Browse providers, favorite models, and choose supported reasoning options."),
+        Item("Safer local data", "Improved backups, attachment limits, context reporting, and local writes."),
+        Item("Replies and projects", "Pause reading aloud, preview project files, and export code safely.")
     )
 
     /**

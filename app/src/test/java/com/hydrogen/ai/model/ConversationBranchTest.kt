@@ -80,4 +80,30 @@ class ConversationBranchTest {
         assertTrue(title.length <= ConversationBranch.MAX_TITLE)
         assertTrue(title.endsWith("… (branch)"))
     }
+    @Test
+    fun temporaryChatCannotBecomeSavedBranchEvenOutsideUi() {
+        assertNull(ConversationBranch.branchAt(source.copy(temporary = true), "a1", "b", 99, ids()))
+    }
+
+    @Test
+    fun comparedAnswerCannotBecomeBranchTarget() {
+        val compared = source.copy(messages = source.messages + msg("comparison", MessageRole.ASSISTANT).copy(comparison = true))
+        assertNull(ConversationBranch.branchAt(compared, "comparison", "b", 99, ids()))
+    }
+
+    @Test
+    fun branchTitleDoesNotOverflowNumberOrSplitEmoji() {
+        assertEquals("Trip ideas (branch 2147483648)", ConversationBranch.branchTitle("Trip ideas (branch 2147483647)"))
+        val emoji = "\uD83D\uDE80"
+        val title = ConversationBranch.branchTitle("x".repeat(49) + emoji + " suffix")
+        assertTrue(title.length <= ConversationBranch.MAX_TITLE)
+        for (index in title.indices) {
+            if (Character.isHighSurrogate(title[index])) {
+                assertTrue(index + 1 < title.length && Character.isLowSurrogate(title[index + 1]))
+            }
+            if (Character.isLowSurrogate(title[index])) {
+                assertTrue(index > 0 && Character.isHighSurrogate(title[index - 1]))
+            }
+        }
+    }
 }

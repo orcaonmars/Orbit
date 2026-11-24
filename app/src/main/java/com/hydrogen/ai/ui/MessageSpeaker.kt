@@ -13,6 +13,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import com.hydrogen.ai.model.PlaybackGeneration
+import com.hydrogen.ai.model.ReplyPlaybackPolicy
 import com.hydrogen.ai.model.SpeakableText
 import com.hydrogen.ai.model.VoiceConversation
 
@@ -39,6 +41,11 @@ class MessageSpeaker(context: Context) {
         private set
     private var currentChunks: List<String> = emptyList()
     private var currentChunk = 0
+    var paused by mutableStateOf(false)
+        private set
+    var speed by mutableStateOf(1f)
+        private set
+    private val playback = PlaybackGeneration()
 
     /**
      * Called on the main thread with the message id when reading ends by itself: [finished] is true when
@@ -60,7 +67,12 @@ class MessageSpeaker(context: Context) {
     fun speak(messageId: String, markdown: String): Boolean {
         val chunks = SpeakableText.chunk(SpeakableText.fromMarkdown(markdown))
         if (chunks.isEmpty()) return false
+        playback.advance()
+        paused = false
+        currentChunks = chunks
+        currentChunk = 0
         speakingId = messageId
+        caption = null
         if (ready) speakNow(messageId, chunks) else {
             pending = messageId to chunks
             ensureEngine()
@@ -69,10 +81,47 @@ class MessageSpeaker(context: Context) {
     }
 
     fun stop() {
+        playback.advance()
         pending = null
+        paused = false
+        currentChunks = emptyList()
+        currentChunk = 0
         speakingId = null
         caption = null
         tts?.stop()
+    }
+
+    /** Android TTS has no pause primitive. Resume restarts the current short speech chunk. */
+    fun pause() {
+        if (speakingId == null || paused) return
+        playback.advance()
+        pending = null
+        paused = true
+        tts?.stop()
+    }
+
+    fun resume() {
+        val id = speakingId ?: return
+        if (!paused || currentChunks.isEmpty()) return
+        paused = false
+        playback.advance()
+        val remaining = ReplyPlaybackPolicy.remaining(currentChunks, currentChunk)
+        if (ready) speakNow(id, remaining) else {
+            pending = id to remaining
+            ensureEngine()
+        }
+    }
+
+    fun setPlaybackSpeed(value: Float) {
+        val next = ReplyPlaybackPolicy.normalizeSpeed(value)
+        if (next == speed) return
+        speed = next
+        tts?.setSpeechRate(speed)
+        // Apply immediately to queued speech by restarting the current chunk.
+        if (speakingId != null && !paused && ready) {
+            pause()
+            resume()
+        }
     }
 
     fun shutdown() {
@@ -89,10 +138,11 @@ class MessageSpeaker(context: Context) {
                 if (status == TextToSpeech.SUCCESS) {
                     ready = true
                     tts?.setOnUtteranceProgressListener(listener)
-                    pending?.let { (id, chunks) -> speakNow(id, chunks) }
+                    tts?.setSpeechRate(speed)
+                    if (!paused) pending?.let { (id, chunks) -> speakNow(id, chunks) }
                 } else {
                     val failedId = speakingId
-                    speakingId = null
+                    stop()
                     failedId?.let { onFinished?.invoke(it, false) }
                     tts?.shutdown()
                     tts = null
@@ -110,15 +160,24 @@ class MessageSpeaker(context: Context) {
         caption = VoiceConversation.captionAt(chunks.first(), 0)
         chunks.forEachIndexed { index, chunk ->
             val mode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-            val utteranceId = if (index == chunks.lastIndex) "$messageId$LAST" else "$messageId#$index"
-            engine.speak(chunk, mode, null, utteranceId)
+            val utteranceId = playback.utteranceId(index)
+            if (engine.speak(chunk, mode, null, utteranceId) == TextToSpeech.ERROR) {
+                fail(utteranceId)
+                return
+            }
         }
     }
 
-    private fun chunkIndex(utteranceId: String?): Int? = when {
-        utteranceId == null -> null
-        utteranceId.endsWith(LAST) -> currentChunks.lastIndex
-        else -> utteranceId.substringAfterLast('#').toIntOrNull()
+    private fun chunkIndex(utteranceId: String?): Int? =
+        playback.indexOf(utteranceId)?.takeIf { it in currentChunks.indices }
+
+    private fun fail(utteranceId: String?) {
+        main.post {
+            if (chunkIndex(utteranceId) == null) return@post
+            val id = speakingId ?: return@post
+            stop()
+            onFinished?.invoke(id, false)
+        }
     }
 
     private val listener = object : UtteranceProgressListener() {
@@ -134,42 +193,32 @@ class MessageSpeaker(context: Context) {
         override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
             main.post {
                 if (speakingId == null) return@post
-                val index = chunkIndex(utteranceId) ?: currentChunk
+                val index = chunkIndex(utteranceId) ?: return@post
                 val next = currentChunks.getOrNull(index)?.let { VoiceConversation.captionAt(it, start) }
                 if (next != null && next != caption) caption = next
             }
         }
 
         override fun onDone(utteranceId: String?) {
-            if (utteranceId?.endsWith(LAST) == true) {
-                val id = utteranceId.removeSuffix(LAST)
-                main.post {
-                    if (speakingId == id) {
-                        speakingId = null
-                        onFinished?.invoke(id, true)
-                    }
-                }
+            main.post {
+                if (chunkIndex(utteranceId) != currentChunks.lastIndex) return@post
+                val id = speakingId ?: return@post
+                playback.advance()
+                speakingId = null
+                paused = false
+                currentChunks = emptyList()
+                currentChunk = 0
+                caption = null
+                onFinished?.invoke(id, true)
             }
         }
 
         @Deprecated("Deprecated in Java")
-        override fun onError(utteranceId: String?) = failed()
+        override fun onError(utteranceId: String?) = fail(utteranceId)
 
-        override fun onError(utteranceId: String?, errorCode: Int) = failed()
-
-        private fun failed() {
-            main.post {
-                val id = speakingId ?: return@post
-                speakingId = null
-                tts?.stop()
-                onFinished?.invoke(id, false)
-            }
-        }
+        override fun onError(utteranceId: String?, errorCode: Int) = fail(utteranceId)
     }
 
-    private companion object {
-        const val LAST = "#last"
-    }
 }
 
 @Composable

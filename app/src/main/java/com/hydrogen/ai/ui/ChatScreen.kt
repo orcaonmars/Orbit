@@ -18,6 +18,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.core.content.FileProvider
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import com.hydrogen.ai.model.ChatKeyboardAction
+import com.hydrogen.ai.model.ChatKeyboardShortcuts
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalConfiguration
@@ -30,7 +40,16 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.key
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.stringResource
+import com.hydrogen.ai.R
+import com.hydrogen.ai.ui.components.OrbitSearchField
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -112,6 +131,7 @@ import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.EditNote
@@ -124,11 +144,9 @@ import androidx.compose.ui.graphics.SolidColor
 import com.hydrogen.ai.model.ModelDisplayName
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.material3.SuggestionChip
-import com.hydrogen.ai.model.QuickReplies
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
@@ -149,9 +167,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -219,6 +235,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -313,17 +330,35 @@ fun ChatScreen(
         if (drawerState.isOpen) scope.launch { drawerState.close() }
         else if (backActivity?.moveTaskToBack(true) != true) backActivity?.finish()
     }
-    var showSettings by remember { mutableStateOf(false) }
-    var showDiagnostics by remember { mutableStateOf(false) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showDiagnostics by rememberSaveable { mutableStateOf(false) }
     var settingsPreset by remember { mutableStateOf<ProviderPreset?>(null) }
-    var showCompanionSheet by remember { mutableStateOf(false) }
+    var browseProvidersOnOpen by remember { mutableStateOf(false) }
+    var showCompanionSheet by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     var showSwitcher by remember { mutableStateOf(false) }
     var renameConnection by remember { mutableStateOf<SavedConnection?>(null) }
     var renameConnectionLabel by remember { mutableStateOf("") }
-    var showMemory by remember { mutableStateOf(false) }
-    var showPersonal by remember { mutableStateOf(false) }
-    var showPrivacy by remember { mutableStateOf(false) }
+    var showMemory by rememberSaveable { mutableStateOf(false) }
+    var showPersonal by rememberSaveable { mutableStateOf(false) }
+    var showPrivacy by rememberSaveable { mutableStateOf(false) }
+    var settingsSession by rememberSaveable { mutableStateOf(false) }
+    var settingsQuery by rememberSaveable { mutableStateOf("") }
+    var showAppearance by rememberSaveable { mutableStateOf(false) }
+    var showAbout by rememberSaveable { mutableStateOf(false) }
+    var showLicenses by rememberSaveable { mutableStateOf(false) }
+    var showWhatsNewAgain by rememberSaveable { mutableStateOf(false) }
+    var privacyFromAbout by rememberSaveable { mutableStateOf(false) }
+    val appearanceController = LocalAppearanceController.current
+    val openSettingsHome: () -> Unit = {
+        settingsQuery = ""
+        settingsSession = true
+    }
+    val closePrivacy: () -> Unit = {
+        showPrivacy = false
+        if (privacyFromAbout) showAbout = true
+        privacyFromAbout = false
+    }
     // The chat list's view (all chats, archived, or a project) and the project sheet: "" is a new project, else its id.
     var drawerView by rememberSaveable { mutableStateOf(DrawerView.MAIN) }
     var projectSheet by remember { mutableStateOf<String?>(null) }
@@ -344,33 +379,35 @@ fun ChatScreen(
     LaunchedEffect(state.relayConfig, state.hasToken) {
         val current = SavedConnections.from(state.relayConfig, state.hasToken, System.currentTimeMillis())
         savedConnections = withContext(Dispatchers.IO) {
-            val loaded = connectionStore.load()
-            if (current == null) {
-                loaded
-            } else {
-                SavedConnections.remember(loaded, current).also { updated ->
-                    runCatching { connectionStore.save(updated) }
-                }
-            }
+            if (current == null) connectionStore.load()
+            else runCatching { connectionStore.update { SavedConnections.remember(it, current) } }
+                .getOrElse { SavedConnections.remember(connectionStore.load(), current) }
         }
     }
     val attachmentStorage = remember(context) {
         LocalAttachmentStorage(File(context.filesDir, "hydrogen_attachments"))
     }
 
+    var pendingImageChat by rememberSaveable { mutableStateOf<String?>(null) }
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris ->
-        if (uris.isNotEmpty()) {
+        val targetId = pendingImageChat
+        pendingImageChat = null
+        if (uris.isNotEmpty() && targetId != null) {
             scope.launch {
                 uris.forEach { uri ->
                     when (val imported = attachmentStorage.importContentUri(context, uri)) {
-                        is AttachmentImportResult.Success -> viewModel.addStagedAttachment(imported.item)
+                        is AttachmentImportResult.Success -> viewModel.addStagedAttachment(imported.item, targetId)
                         is AttachmentImportResult.Failure -> viewModel.reportAttachmentImportFailure(imported.reason)
                     }
                 }
             }
         }
+    }
+    val pickImages: () -> Unit = {
+        pendingImageChat = viewModel.uiState.value.activeConversationId
+        if (pendingImageChat != null) imagePicker.launch("image/*")
     }
     // Voice runs inside Orbit with the phone's own recognizer (on-device when the phone can do it). No system
     // popup. Orbit gets text back from the recognizer and never stores audio.
@@ -435,14 +472,17 @@ fun ChatScreen(
         context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)
     }
     var pendingCameraPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingCameraChat by rememberSaveable { mutableStateOf<String?>(null) }
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { saved ->
         val path = pendingCameraPath ?: return@rememberLauncherForActivityResult
+        val targetId = pendingCameraChat
         pendingCameraPath = null
+        pendingCameraChat = null
         val photo = File(path)
         scope.launch {
-            if (saved && photo.length() > 0L) {
+            if (saved && photo.length() > 0L && targetId != null) {
                 val name = "photo_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".jpg"
                 when (val imported = attachmentStorage.importFromStream(
                     displayName = name,
@@ -450,7 +490,7 @@ fun ChatScreen(
                     reportedSizeBytes = photo.length(),
                     openInput = { photo.inputStream() }
                 )) {
-                    is AttachmentImportResult.Success -> viewModel.addStagedAttachment(imported.item)
+                    is AttachmentImportResult.Success -> viewModel.addStagedAttachment(imported.item, targetId)
                     is AttachmentImportResult.Failure -> viewModel.reportAttachmentImportFailure(imported.reason)
                 }
             }
@@ -463,11 +503,14 @@ fun ChatScreen(
         dir.listFiles()?.forEach { it.delete() }
         val file = File(dir, "capture_${System.currentTimeMillis()}.jpg")
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        pendingCameraChat = viewModel.uiState.value.activeConversationId
         pendingCameraPath = file.absolutePath
         try {
             cameraLauncher.launch(uri)
         } catch (_: ActivityNotFoundException) {
             pendingCameraPath = null
+            pendingCameraChat = null
+            file.delete()
             Toast.makeText(context, "No camera app found.", Toast.LENGTH_SHORT).show()
         }
     }
@@ -584,16 +627,17 @@ fun ChatScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val hostView = LocalView.current
     // Launcher shortcut / Quick Settings tile / assistant gesture: always a fresh chat, then the matching hand-off.
-    LaunchedEffect(quickAction) {
+    LaunchedEffect(quickAction, state.isLoading) {
+        if (state.isLoading) return@LaunchedEffect
         val action = quickAction ?: return@LaunchedEffect
         // Consuming clears this effect's key, which would cancel it at its first suspension point;
         // the follow-up work therefore runs in the screen's own scope.
         onQuickActionConsumed()
         scope.launch {
             if (drawerState.isOpen) drawerState.snapTo(DrawerValue.Closed)
-            viewModel.createNewConversation()
+            viewModel.createNewConversation().join()
             when (action) {
-                QuickAction.ASK_PHOTO -> if (cameraAvailable) takePhoto() else imagePicker.launch("image/*")
+                QuickAction.ASK_PHOTO -> if (cameraAvailable) takePhoto() else pickImages()
                 QuickAction.VOICE -> if (voiceAvailable) startDictation()
                 QuickAction.NEW_CHAT -> Unit
             }
@@ -612,10 +656,13 @@ fun ChatScreen(
     }
     val documentImporter = remember(attachmentStorage) { DocumentImporter(attachmentStorage) }
     // Selected documents stay on this device until the user taps Send.
+    var pendingFileChat by rememberSaveable { mutableStateOf<String?>(null) }
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
-        if (uris.isNotEmpty()) {
+        val targetId = pendingFileChat
+        pendingFileChat = null
+        if (uris.isNotEmpty() && targetId != null) {
             scope.launch {
                 val chosen = uris.take(6)
                 val notices = mutableListOf<String>()
@@ -626,13 +673,11 @@ fun ChatScreen(
                 for (uri in chosen) {
                     val config = viewModel.uiState.value.relayConfig
                     val remainingImages = config.maxImagesPerRequest -
-                        viewModel.uiState.value.stagedAttachments.size
+                        viewModel.stagedAttachmentCount(targetId)
                     when (val result = documentImporter.import(context, uri, remainingImages.coerceAtLeast(1))) {
                         is DocumentImportResult.Text -> {
-                            viewModel.updateDraft(
-                                ShareIntentParser.mergeIntoDraft(viewModel.uiState.value.draftText, result.draftText)
-                            )
-                            importedCount++
+                            if (viewModel.appendImportedText(targetId, result.draftText)) importedCount++
+                            else notices += "The original chat no longer exists. Document not added."
                             if (result.truncated) notices += "${result.displayName}: only the beginning was added."
                         }
                         is DocumentImportResult.Images -> {
@@ -640,9 +685,9 @@ fun ChatScreen(
                                 result.items.forEach { attachmentStorage.deleteIfOwned(it.localUri) }
                                 notices += "PDF image limit reached. No pages attached."
                             } else {
-                                result.items.take(remainingImages).forEach { viewModel.addStagedAttachment(it) }
+                                val accepted = result.items.take(remainingImages).count { viewModel.addStagedAttachment(it, targetId) }
                                 result.items.drop(remainingImages).forEach { attachmentStorage.deleteIfOwned(it.localUri) }
-                                importedCount++
+                                if (accepted > 0) importedCount++ else notices += "The original chat no longer exists. Pages not added."
                                 if (result.totalPages > result.items.size || result.items.size > remainingImages) {
                                     notices += "Some PDF pages were omitted. Check the attachment tray."
                                 }
@@ -665,12 +710,13 @@ fun ChatScreen(
     }
 
     // Content shared from another app goes into the composer for review; it is never auto-sent.
-    LaunchedEffect(sharedContent) {
+    LaunchedEffect(sharedContent, state.isLoading) {
+        if (state.isLoading) return@LaunchedEffect
         val shared = sharedContent ?: return@LaunchedEffect
+        val targetId = viewModel.uiState.value.activeConversationId
+        if (targetId == null) return@LaunchedEffect
         if (!shared.text.isNullOrBlank()) {
-            viewModel.updateDraft(
-                ShareIntentParser.mergeIntoDraft(viewModel.uiState.value.draftText, shared.text)
-            )
+            viewModel.appendImportedText(targetId, shared.text)
         }
         var importedImages = 0
         shared.imageUris.forEach { raw ->
@@ -680,8 +726,7 @@ fun ChatScreen(
                 .getOrElse { AttachmentImportResult.Failure("Could not read a shared image.") }
             when (imported) {
                 is AttachmentImportResult.Success -> {
-                    viewModel.addStagedAttachment(imported.item)
-                    importedImages++
+                    if (viewModel.addStagedAttachment(imported.item, targetId)) importedImages++
                 }
                 is AttachmentImportResult.Failure -> viewModel.reportAttachmentImportFailure(imported.reason)
             }
@@ -801,14 +846,9 @@ fun ChatScreen(
                 pendingMoveChat = moveChatId
                 projectSheet = ""
             },
-            onBackup = { backupExporter.launch("orbit-chats-backup.json") },
-            onRestore = { backupImporter.launch(arrayOf("application/json", "text/plain")) },
-            onExportMarkdown = {
-                if (state.savedConversations.any { c -> c.messages.isNotEmpty() }) {
-                    markdownExporter.launch("orbit-chats.md")
-                } else {
-                    Toast.makeText(context, "No chats to export yet.", Toast.LENGTH_SHORT).show()
-                }
+            onOpenSettings = {
+                if (!twoPane) scope.launch { drawerState.close() }
+                openSettingsHome()
             }
         )
     }
@@ -823,22 +863,25 @@ fun ChatScreen(
                 if (project != null) viewModel.newChatInProject(project.id) else viewModel.createNewConversation()
             },
             onTemporaryChat = { on -> if (on) viewModel.startTemporaryChat() else viewModel.leaveTemporaryChat() },
-            onOpenPersonal = { showPersonal = true },
+            onOpenSettingsHome = openSettingsHome,
             onOpenProject = { projectSheet = it },
             onOpenCompanion = { showCompanionSheet = true },
             onOpenSettings = {
                 settingsPreset = null
                 showSettings = true
             },
-            onSwitchModel = { showSwitcher = true },
+            onSwitchModel = { if (!state.isSending) showSwitcher = true },
             onSetupProvider = { preset ->
                 settingsPreset = preset
                 showSettings = true
             },
             onDraftChange = viewModel::updateDraft,
-            onPickImages = { imagePicker.launch("image/*") },
+            onPickImages = pickImages,
             onTakePhoto = if (cameraAvailable) takePhoto else null,
-            onPickFile = { filePicker.launch(arrayOf("*/*")) },
+            onPickFile = {
+                pendingFileChat = viewModel.uiState.value.activeConversationId
+                if (pendingFileChat != null) filePicker.launch(arrayOf("*/*"))
+            },
             voiceAvailable = voiceAvailable,
             onVoiceInput = startDictation,
             dictation = if (dictating) speech else null,
@@ -854,16 +897,11 @@ fun ChatScreen(
             onShowVersion = viewModel::showVersion,
             onCompare = viewModel::compareWith,
             onBranch = viewModel::branchFrom,
-            onQuickReply = { reply ->
-                viewModel.updateDraft(reply)
-                viewModel.sendMessage()
-            },
             onLoadModels = viewModel::loadModelList,
             onSetSystemPrompt = viewModel::setSystemPrompt,
             onEditMessage = viewModel::startEditingMessage,
             onCancelEdit = viewModel::cancelEditing,
-            onOpenMemory = { showMemory = true },
-            onOpenPrivacy = { showPrivacy = true },
+            onReasoningMode = viewModel::setReasoningMode,
             onAskPcAction = { messageId, action ->
                 // None of these approves anything: approval only ever happens on the PC.
                 when (action) {
@@ -930,6 +968,49 @@ fun ChatScreen(
             dismissButton = { TextButton(onClick = { showMicNeeded = false }) { Text("Not now") } }
         )
     }
+    // Child sheets replace the root while open. Closing a child restores the search and root.
+    val settingsChildOpen = showSettings || showDiagnostics || showCompanionSheet || showMemory ||
+        showPersonal || showPrivacy || showAppearance || showAbout || showLicenses || showWhatsNewAgain
+    if (settingsSession && !settingsChildOpen && !state.whatsNew) {
+        StudioSettingsScreen(
+            query = settingsQuery, onQueryChange = { settingsQuery = it },
+            onPersonal = { showPersonal = true },
+            onMemory = { showMemory = true },
+            onModels = { settingsPreset = null; showSettings = true },
+            onAppearance = if (appearanceController != null) ({ showAppearance = true }) else null,
+            onPrivacy = { privacyFromAbout = false; showPrivacy = true },
+            onCompanion = { showCompanionSheet = true },
+            onAbout = { showAbout = true },
+            onBackup = { backupExporter.launch("orbit-chats-backup.json") },
+            onRestore = { backupImporter.launch(arrayOf("application/json", "text/plain")) },
+            onExportMarkdown = {
+                if (state.savedConversations.any { it.messages.isNotEmpty() }) {
+                    markdownExporter.launch("orbit-chats.md")
+                } else {
+                    Toast.makeText(context, "No chats to export yet.", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onDismiss = { settingsSession = false; settingsQuery = "" }
+        )
+    }
+    if (showAppearance && appearanceController != null) {
+        AppearanceSheet(controller = appearanceController, onDismiss = { showAppearance = false })
+    }
+    if (showAbout) {
+        AboutSheet(
+            onDismiss = { showAbout = false },
+            onWhatsNew = { showAbout = false; showWhatsNewAgain = true },
+            onPrivacy = { showAbout = false; privacyFromAbout = true; showPrivacy = true },
+            onLicenses = { showAbout = false; showLicenses = true }
+        )
+    }
+    if (showLicenses) {
+        val returnToAbout: () -> Unit = { showLicenses = false; showAbout = true }
+        LicensesSheet(onDismiss = returnToAbout, onBack = returnToAbout)
+    }
+    if (showWhatsNewAgain) {
+        WhatsNewSheet(onDismiss = { showWhatsNewAgain = false; showAbout = true })
+    }
     if (showPrivacy) {
         val promptCount by produceState(initialValue = 0, showPrivacy) {
             value = withContext(Dispatchers.IO) {
@@ -952,6 +1033,9 @@ fun ChatScreen(
             ),
             onDeleteAll = {
                 showPrivacy = false
+                settingsSession = false
+                settingsQuery = ""
+                privacyFromAbout = false
                 viewModel.deleteAllLocalData()
                 savedConnections = emptyList()
                 scope.launch(Dispatchers.IO) {
@@ -962,7 +1046,7 @@ fun ChatScreen(
                         .forEach { dir -> dir.listFiles()?.forEach { runCatching { it.deleteRecursively() } } }
                 }
             },
-            onDismiss = { showPrivacy = false }
+            onDismiss = closePrivacy
         )
     }
     if (state.whatsNew) {
@@ -1020,6 +1104,7 @@ fun ChatScreen(
             onAdd = viewModel::addMemory,
             onUpdate = viewModel::updateMemory,
             onRemove = viewModel::removeMemory,
+            onSetPinned = viewModel::setMemoryPinned,
             onClearAll = viewModel::clearMemory,
             onDismiss = { showMemory = false }
         )
@@ -1041,7 +1126,8 @@ fun ChatScreen(
                     cfg.maxImagesPerRequest,
                     cfg.streamingEnabled,
                     cfg.rememberTokenInKeystore,
-                    if (target.route == ProviderRoute.GOOGLE_AI_STUDIO_DIRECT) target.webSearchEnabled else cfg.webSearchEnabled
+                    if (target.route == ProviderRoute.GOOGLE_AI_STUDIO_DIRECT) target.webSearchEnabled else cfg.webSearchEnabled,
+                    reasoningMode = target.reasoningMode
                 )
                 if (target.needsKey && !viewModel.uiState.value.hasToken) {
                     settingsPreset = null
@@ -1050,9 +1136,20 @@ fun ChatScreen(
                 }
             },
             onRemove = { target ->
-                val updated = SavedConnections.remove(savedConnections, target)
-                savedConnections = updated
-                scope.launch(Dispatchers.IO) { runCatching { connectionStore.save(updated) } }
+                scope.launch {
+                    val updated = withContext(Dispatchers.IO) {
+                        runCatching { connectionStore.update { SavedConnections.remove(it, target) } }.getOrNull()
+                    }
+                    if (updated != null) savedConnections = updated
+                }
+            },
+            onPin = { target ->
+                scope.launch {
+                    val updated = withContext(Dispatchers.IO) {
+                        runCatching { connectionStore.update { SavedConnections.setPinned(it, target, !target.pinned) } }.getOrNull()
+                    }
+                    if (updated != null) savedConnections = updated
+                }
             },
             onRename = { target ->
                 renameConnection = target
@@ -1061,6 +1158,7 @@ fun ChatScreen(
             onOpenSettings = {
                 showSwitcher = false
                 settingsPreset = null
+                browseProvidersOnOpen = true
                 showSettings = true
             },
             onDismiss = { showSwitcher = false }
@@ -1082,9 +1180,13 @@ fun ChatScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
-                    val updated = SavedConnections.rename(savedConnections, target, renameConnectionLabel)
-                    savedConnections = updated
-                    scope.launch(Dispatchers.IO) { runCatching { connectionStore.save(updated) } }
+                    val label = renameConnectionLabel
+                    scope.launch {
+                        val updated = withContext(Dispatchers.IO) {
+                            runCatching { connectionStore.update { SavedConnections.rename(it, target, label) } }.getOrNull()
+                        }
+                        if (updated != null) savedConnections = updated
+                    }
                     renameConnection = null
                 }) { Text("Save name") }
             },
@@ -1102,8 +1204,11 @@ fun ChatScreen(
             capabilities = state.capabilities,
             readiness = state.readiness,
             isCheckingHealth = state.isCheckingHealth,
-            onDismiss = { showSettings = false },
-            onSave = viewModel::saveRelaySettings,
+            onDismiss = { showSettings = false; browseProvidersOnOpen = false },
+            onSave = { route, url, model, token, contextTokens, images, streaming, remember, search, effort ->
+                viewModel.saveRelaySettings(route, url, model, token, contextTokens, images, streaming, remember, search,
+                    reasoningMode = effort)
+            },
             onCheckHealth = viewModel::checkRelayHealth,
             onDeleteCredential = viewModel::deleteActiveProviderCredential,
             onOpenDiagnostics = {
@@ -1113,6 +1218,7 @@ fun ChatScreen(
             modelList = state.modelList,
             onLoadModels = viewModel::loadModelList,
             initialPreset = settingsPreset,
+            startWithCatalog = browseProvidersOnOpen,
             // The PC's Wi-Fi address, learned from the Companion pairing (or the address typed for it).
             pcWifiHost = (state.companion.session?.baseUrl ?: state.companion.config.baseUrl)
                 .let { com.hydrogen.ai.companion.CompanionUrlSafety.lanIpv4Host(it) },
@@ -1126,7 +1232,7 @@ fun ChatScreen(
         DiagnosticsSheet(
             entries = state.errorLog,
             onClear = viewModel::clearErrorLog,
-            onDismiss = { showDiagnostics = false }
+            onDismiss = { showDiagnostics = false; showSettings = true }
         )
     }
 
@@ -1152,6 +1258,7 @@ fun ChatScreen(
             onInsertResultIntoDraft = {
                 if (viewModel.insertCompanionResultIntoDraft()) {
                     showCompanionSheet = false
+                    settingsSession = false
                 }
             }
         )
@@ -1219,9 +1326,7 @@ private fun ConversationDrawerContent(
     onMoveToProject: (String, String?) -> Unit,
     onEditProject: (String) -> Unit,
     onNewProject: (moveChatId: String?) -> Unit,
-    onBackup: () -> Unit,
-    onRestore: () -> Unit,
-    onExportMarkdown: () -> Unit
+    onOpenSettings: () -> Unit
 ) {
     // Saveable: rotating, unfolding or a light/dark switch recreates the screen and would otherwise clear the search.
     var query by rememberSaveable { mutableStateOf("") }
@@ -1380,11 +1485,11 @@ private fun ConversationDrawerContent(
             openProject != null -> {
                 DrawerSubHeader(title = openProject.name, onBack = { onViewChange(DrawerView.MAIN) }) {
                     IconButton(onClick = { onEditProject(openProject.id) }) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Edit project")
+                        Icon(OrbitIcons.Edit, contentDescription = "Edit project")
                     }
                 }
                 DrawerActionButton(
-                    icon = Icons.Default.Add,
+                    icon = OrbitIcons.Add,
                     label = "New chat in this project",
                     onClick = { onNewChatInProject(openProject.id) }
                 )
@@ -1417,7 +1522,7 @@ private fun ConversationDrawerContent(
                         Icon(Icons.Outlined.EditNote, contentDescription = "New chat")
                     }
                 }
-                DrawerActionButton(icon = Icons.Default.Add, label = "New chat", onClick = onNewChat)
+                DrawerActionButton(icon = OrbitIcons.Add, label = "New chat", onClick = onNewChat)
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1430,7 +1535,7 @@ private fun ConversationDrawerContent(
                         modifier = Modifier.padding(start = 12.dp, end = 4.dp)
                     ) {
                         Icon(
-                            Icons.Default.Search,
+                            OrbitIcons.Search,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(20.dp)
@@ -1459,7 +1564,7 @@ private fun ConversationDrawerContent(
                         }
                         if (query.isNotEmpty()) {
                             IconButton(onClick = { query = "" }, modifier = Modifier.size(36.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = "Clear search", modifier = Modifier.size(18.dp))
+                                Icon(OrbitIcons.Close, contentDescription = "Clear search", modifier = Modifier.size(18.dp))
                             }
                         }
                     }
@@ -1491,7 +1596,7 @@ private fun ConversationDrawerContent(
                 if (hiddenProjects > 0) {
                     item(key = "projects-more", contentType = "nav") {
                         DrawerNavRow(
-                            icon = Icons.Default.KeyboardArrowDown,
+                            icon = OrbitIcons.ChevronDown,
                             label = "Show all ${projects.size} projects",
                             onClick = { showAllProjects = true },
                             modifier = Modifier.animateItem()
@@ -1568,26 +1673,47 @@ private fun ConversationDrawerContent(
         }
         if (inMain) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            val footerButtons: @Composable () -> Unit = {
-                TextButton(onClick = onBackup) {
-                    Text("Back up", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                TextButton(onClick = onRestore) {
-                    Text("Restore", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                TextButton(onClick = onExportMarkdown) {
-                    Text("Export", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            DrawerSettingsFooter(state.personal.name, onOpenSettings)
+        }
+    }
+}
+
+/** The footer is a local settings entry, not a simulated signed-in account. */
+@Composable
+private fun DrawerSettingsFooter(name: String, onClick: () -> Unit) {
+    val colors = OrbitTheme.colors
+    val space = OrbitTheme.space
+    val title = name.trim().ifBlank { stringResource(com.hydrogen.ai.R.string.studio_settings) }
+    Surface(
+        onClick = onClick,
+        color = colors.bg,
+        shape = OrbitTheme.shapes.l,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = space.s, vertical = space.s)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = space.m, vertical = space.m),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(space.m)
+        ) {
+            Box(
+                modifier = Modifier.size(40.dp).clip(CircleShape).background(colors.surface2),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(OrbitIcons.Tune, contentDescription = null, tint = colors.text, modifier = Modifier.size(20.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = colors.text)
+                if (name.isNotBlank()) {
+                    Text(stringResource(com.hydrogen.ai.R.string.studio_settings), color = colors.muted,
+                        style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Text(stringResource(com.hydrogen.ai.R.string.studio_settings_local_profile), color = colors.muted,
+                        style = MaterialTheme.typography.bodySmall)
                 }
             }
-            val footerModifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
-            // Large system font sizes would break the side-by-side buttons mid-word; stack them.
-            if (LocalDensity.current.fontScale > LARGE_FONT_SCALE) {
-                Column(modifier = footerModifier) { footerButtons() }
-            } else {
-                Row(modifier = footerModifier) { footerButtons() }
-            }
+            Icon(OrbitIcons.ChevronDown, contentDescription = null, tint = colors.muted,
+                modifier = Modifier.size(18.dp).rotate(-90f))
         }
     }
 }
@@ -1750,7 +1876,7 @@ private fun DrawerNavRow(
             }
             if (selected) {
                 Icon(
-                    Icons.Default.Check,
+                    OrbitIcons.Check,
                     contentDescription = "Current project",
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
@@ -1918,7 +2044,7 @@ private fun DrawerConversationRow(
                     }
                     OrbitMenuItem(
                         text = { Text("Rename") },
-                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        leadingIcon = { Icon(OrbitIcons.Edit, contentDescription = null) },
                         onClick = {
                             menuOpen = false
                             onRename()
@@ -1950,7 +2076,7 @@ private fun DrawerConversationRow(
                     OrbitMenuItem(
                         text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                         leadingIcon = {
-                            Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                            Icon(OrbitIcons.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                         },
                         onClick = {
                             menuOpen = false
@@ -2016,7 +2142,7 @@ private fun ChatScaffold(
     onNewChat: () -> Unit,
     /** True starts a temporary chat; false ends it and goes back to the chat that was open before. */
     onTemporaryChat: (Boolean) -> Unit = {},
-    onOpenPersonal: () -> Unit = {},
+    onOpenSettingsHome: () -> Unit,
     /** Opens the project sheet for a project id (from the pill above a project chat). */
     onOpenProject: (String) -> Unit = {},
     onOpenCompanion: () -> Unit,
@@ -2043,15 +2169,15 @@ private fun ChatScaffold(
     onShowVersion: (messageId: String, target: Int) -> Unit = { _, _ -> },
     onCompare: (String) -> Unit = {},
     onBranch: (String) -> Unit = {},
-    onQuickReply: (String) -> Unit = {},
     onLoadModels: () -> Unit = {},
     onSetSystemPrompt: (conversationId: String, text: String) -> Unit = { _, _ -> },
     onEditMessage: (String) -> Unit = {},
     onCancelEdit: () -> Unit = {},
-    onOpenMemory: () -> Unit = {},
-    onOpenPrivacy: () -> Unit = {},
+    cleanApisBudget: Boolean = false,
+    onReasoningMode: (com.hydrogen.ai.model.ReasoningMode) -> Unit = {},
     onAskPcAction: (messageId: String, action: AskPcCardAction) -> Unit = { _, _ -> }
 ) {
+    var findOpen by rememberSaveable(state.activeConversationId) { mutableStateOf(false) }
     var editingInstructionsFor by remember { mutableStateOf<Conversation?>(null) }
     editingInstructionsFor?.let { conversation ->
         ChatInstructionsDialog(
@@ -2064,6 +2190,34 @@ private fun ChatScaffold(
         )
     }
     Scaffold(
+        modifier = Modifier.onPreviewKeyEvent { event ->
+            if (event.type != KeyEventType.KeyDown) {
+                false
+            } else {
+                val action = ChatKeyboardShortcuts.resolve(
+                    key = when (event.key) {
+                        Key.F -> 'f'
+                        Key.O -> 'o'
+                        Key.K -> 'k'
+                        else -> null
+                    },
+                    ctrl = event.isCtrlPressed,
+                    meta = event.isMetaPressed,
+                    shift = event.isShiftPressed,
+                    escape = event.key == Key.Escape,
+                    hasMessages = !state.activeConversation?.messages.isNullOrEmpty(),
+                    findOpen = findOpen,
+                    canOpenDrawer = onOpenDrawer != null
+                )
+                when (action) {
+                    ChatKeyboardAction.FIND_IN_CHAT -> { findOpen = true; true }
+                    ChatKeyboardAction.NEW_CHAT -> { onNewChat(); true }
+                    ChatKeyboardAction.OPEN_CONVERSATIONS -> { onOpenDrawer?.invoke(); true }
+                    ChatKeyboardAction.CLOSE_FIND -> { findOpen = false; true }
+                    null -> false
+                }
+            }
+        },
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             CenterAlignedTopAppBar(
@@ -2103,7 +2257,7 @@ private fun ChatScaffold(
                         )
                         Spacer(Modifier.width(2.dp))
                         Icon(
-                            Icons.Default.KeyboardArrowDown,
+                            OrbitIcons.ChevronDown,
                             contentDescription = null,
                             tint = OrbitTheme.colors.muted,
                             modifier = Modifier.size(18.dp)
@@ -2113,7 +2267,7 @@ private fun ChatScaffold(
                 navigationIcon = {
                     if (onOpenDrawer != null) {
                         IconButton(onClick = onOpenDrawer) {
-                            Icon(Icons.Default.Menu, contentDescription = "Open conversations")
+                            Icon(OrbitIcons.Menu, contentDescription = "Open conversations")
                         }
                     }
                 },
@@ -2128,17 +2282,6 @@ private fun ChatScaffold(
                         }
                     }
                     var menuOpen by remember { mutableStateOf(false) }
-                    var showAbout by remember { mutableStateOf(false) }
-                    var showLicenses by remember { mutableStateOf(false) }
-                    var showAppearance by remember { mutableStateOf(false) }
-                    var showWhatsNewAgain by remember { mutableStateOf(false) }
-                    val appearanceController = LocalAppearanceController.current
-                    if (showAppearance && appearanceController != null) {
-                        AppearanceSheet(controller = appearanceController, onDismiss = { showAppearance = false })
-                    }
-                    if (showWhatsNewAgain) {
-                        WhatsNewSheet(onDismiss = { showWhatsNewAgain = false })
-                    }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "More options")
@@ -2171,46 +2314,19 @@ private fun ChatScaffold(
                                             else "Chat instructions"
                                         )
                                     },
-                                    leadingIcon = { Icon(Icons.Default.Tune, contentDescription = null) },
+                                    leadingIcon = { Icon(OrbitIcons.Tune, contentDescription = null) },
                                     onClick = {
                                         menuOpen = false
                                         editingInstructionsFor = conversation
                                     }
                                 )
                             }
-                            OrbitMenuItem(
-                                text = { Text(if (state.personal.isEmpty) "Personal" else "Personal (on)") },
-                                leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenPersonal()
-                                }
-                            )
-                            OrbitMenuItem(
-                                text = {
-                                    Text(
-                                        when {
-                                            !state.memoryEnabled -> "Memory (off)"
-                                            state.memoryItems.isEmpty() -> "Memory"
-                                            else -> "Memory (${state.memoryItems.size})"
-                                        }
-                                    )
-                                },
-                                leadingIcon = { Icon(Icons.Outlined.Psychology, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenMemory()
-                                }
-                            )
-                            OrbitMenuItem(
-                                text = { Text("Privacy & data") },
-                                leadingIcon = { Icon(Icons.Outlined.PrivacyTip, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenPrivacy()
-                                }
-                            )
                             if (shareable != null) {
+                                OrbitMenuItem(
+                                    text = { Text("Find in conversation") },
+                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                    onClick = { menuOpen = false; findOpen = true }
+                                )
                                 OrbitMenuItem(
                                     text = { Text("Share chat") },
                                     leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
@@ -2228,67 +2344,13 @@ private fun ChatScaffold(
                                 )
                             }
                             OrbitMenuItem(
-                                text = { Text(if (state.companion.isPaired) "PC Companion (paired)" else "PC Companion") },
-                                leadingIcon = { Icon(Icons.Default.Devices, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenCompanion()
-                                }
-                            )
-                            OrbitMenuItem(
-                                text = { Text("Models & API keys") },
-                                leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    onOpenSettings()
-                                }
-                            )
-                            if (appearanceController != null) {
-                                OrbitMenuItem(
-                                    text = { Text("Appearance") },
-                                    leadingIcon = { Icon(Icons.Outlined.Palette, contentDescription = null) },
-                                    onClick = {
-                                        menuOpen = false
-                                        showAppearance = true
-                                    }
-                                )
-                            }
-                            OrbitMenuItem(
-                                text = { Text("About Orbit") },
-                                leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
-                                onClick = {
-                                    menuOpen = false
-                                    showAbout = true
-                                }
+                                text = { Text("Settings") },
+                                leadingIcon = { Icon(OrbitIcons.Tune, contentDescription = null) },
+                                onClick = { menuOpen = false; onOpenSettingsHome() }
                             )
                         }
                     }
-                    if (showAbout) {
-                        AboutSheet(
-                            onDismiss = { showAbout = false },
-                            onWhatsNew = {
-                                showAbout = false
-                                showWhatsNewAgain = true
-                            },
-                            onPrivacy = {
-                                showAbout = false
-                                onOpenPrivacy()
-                            },
-                            onLicenses = {
-                                showAbout = false
-                                showLicenses = true
-                            }
-                        )
-                    }
-                    if (showLicenses) {
-                        LicensesSheet(
-                            onDismiss = { showLicenses = false },
-                            onBack = {
-                                showLicenses = false
-                                showAbout = true
-                            }
-                        )
-                    }
+
                 }
             )
         },
@@ -2308,6 +2370,8 @@ private fun ChatScaffold(
                 )
             }
             // Voice chat draws its own full-screen view on top, so the composer stays put underneath.
+            Column {
+            if (voiceChatPhase == null) ReplyPlaybackBar(speaker)
             ComposerBar(
                 onStartVoiceChat = onStartVoiceChat,
                 dictation = dictation,
@@ -2328,8 +2392,15 @@ private fun ChatScaffold(
                 onSend = onSend,
                 onCancelSend = onCancelSend,
                 isEditing = state.editingMessageId != null,
-                onCancelEdit = onCancelEdit
+                onCancelEdit = onCancelEdit,
+                reasoningMode = state.relayConfig.reasoningMode,
+                reasoningChoices = reasoningOptions(state.relayConfig.route, state.relayConfig.effectiveBaseUrl, state.relayConfig.modelId, state.relayConfig.openRouterReasoningModels),
+                cleanApisBudget = com.hydrogen.ai.model.ReasoningPolicy.isCleanApis(state.relayConfig.effectiveBaseUrl),
+                onReasoningMode = onReasoningMode,
+                modelLabel = ModelDisplayName.short(state.relayConfig.modelId),
+                onSwitchModel = onSwitchModel
             )
+            }
         }
     ) { innerPadding ->
         ChatBodyContent(
@@ -2345,14 +2416,15 @@ private fun ChatScaffold(
             onCompare = onCompare,
             onBranch = onBranch,
             // Hidden during voice chat: that loop sends what you say, not taps.
-            onQuickReply = if (voiceChatPhase == null) onQuickReply else null,
             onLoadModels = onLoadModels,
             onDraftChange = onDraftChange,
             onEditMessage = onEditMessage,
             onSetSystemPrompt = onSetSystemPrompt,
             onAskPcAction = onAskPcAction,
             onOpenProject = onOpenProject,
-            speaker = speaker
+            speaker = speaker,
+            findOpen = findOpen,
+            onCloseFind = { findOpen = false }
         )
     }
 }
@@ -2369,17 +2441,24 @@ private fun ChatBodyContent(
     onShowVersion: (messageId: String, target: Int) -> Unit,
     onCompare: (String) -> Unit,
     onBranch: (String) -> Unit,
-    onQuickReply: ((String) -> Unit)?,
     onLoadModels: () -> Unit,
     onDraftChange: (String) -> Unit,
     onEditMessage: (String) -> Unit,
     onSetSystemPrompt: (conversationId: String, text: String) -> Unit,
     onAskPcAction: (messageId: String, action: AskPcCardAction) -> Unit,
-    onOpenProject: (String) -> Unit = {}
+    onOpenProject: (String) -> Unit = {},
+    findOpen: Boolean = false,
+    onCloseFind: () -> Unit = {}
 ) {
     val messages = state.activeConversation?.messages.orEmpty()
     // What the screen, copy, share and read-aloud use: replies without their hidden ```orbit-pc block.
     val shownMessages = remember(messages) { messages.map(::withoutAskPcBlock) }
+    var findQuery by rememberSaveable(state.activeConversationId) { mutableStateOf("") }
+    var findPosition by rememberSaveable(state.activeConversationId) { mutableStateOf(0) }
+    val findMatches = remember(shownMessages, findQuery, findOpen) {
+        if (findOpen) com.hydrogen.ai.model.ChatFind.matches(shownMessages, findQuery) else emptyList()
+    }
+    val selectedMatch = findMatches.getOrNull(findPosition.coerceIn(0, (findMatches.size - 1).coerceAtLeast(0)))
     var showCompare by remember { mutableStateOf(false) }
     val canCompare = !state.isSending && CompareModelsPolicy.canCompare(messages)
     if (showCompare && canCompare) {
@@ -2399,6 +2478,48 @@ private fun ChatBodyContent(
     // Stop reading aloud when the user switches to another chat.
     LaunchedEffect(state.activeConversationId) { speaker.stop() }
     Column(modifier = modifier) {
+        if (findOpen) {
+            BackHandler { onCloseFind() }
+            val focus = remember { FocusRequester() }
+            LaunchedEffect(Unit) { focus.requestFocus() }
+            Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = findQuery,
+                            onValueChange = {
+                                findQuery = it.take(com.hydrogen.ai.model.ChatFind.MAX_QUERY_LENGTH)
+                                findPosition = 0
+                            },
+                            singleLine = true, label = { Text("Find in chat") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            shape = RoundedCornerShape(16.dp), modifier = Modifier.weight(1f).focusRequester(focus)
+                        )
+                        IconButton(onClick = onCloseFind) { Icon(Icons.Default.Close, contentDescription = "Close search") }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(when {
+                            findQuery.isBlank() -> "Search this conversation"
+                            findMatches.isEmpty() -> "No matching messages"
+                            else -> "Message "+(findPosition.coerceIn(0, findMatches.lastIndex)+1)+" of "+findMatches.size
+                        }, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { findPosition = com.hydrogen.ai.model.ChatFind.step(findPosition, -1, findMatches.size) },
+                            enabled = findMatches.isNotEmpty()) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous match") }
+                        IconButton(onClick = { findPosition = com.hydrogen.ai.model.ChatFind.step(findPosition, 1, findMatches.size) },
+                            enabled = findMatches.isNotEmpty()) { Icon(OrbitIcons.ChevronDown, contentDescription = "Next match") }
+                    }
+                    selectedMatch?.let { index ->
+                        val preview = com.hydrogen.ai.model.ChatFind.preview(shownMessages[index], findQuery)
+                        if (preview.isNotBlank()) {
+                            Text(preview, style = MaterialTheme.typography.bodySmall,
+                                maxLines = 3, overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(bottom = 6.dp))
+                        }
+                    }
+                }
+            }
+        }
         AnimatedVisibility(visible = state.isTemporaryChat, enter = fadeIn(tween(200)), exit = fadeOut(tween(150))) {
             TemporaryChatBanner()
         }
@@ -2446,37 +2567,56 @@ private fun ChatBodyContent(
                 }
             )
         } else {
-            val listState = rememberLazyListState()
-            // Flipping a turn's versions ("< 2 / 3 >") is reading in place, so it must not jump to the bottom the
-            // way a new message does. Plain holder, not state: setting it never needs a recomposition.
-            val flippedAt = remember { longArrayOf(0L) }
-            val justFlipped = { android.os.SystemClock.uptimeMillis() - flippedAt[0] < 1_000 }
-            LaunchedEffect(messages.size) {
-                if (messages.isNotEmpty() && !justFlipped()) {
-                    listState.animateScrollToItem(messages.lastIndex)
-                }
-            }
-            // Follow a reply as it streams in or finishes (actions row appears), but only while the
-            // latest message is still on screen so reading older messages is never interrupted.
+            val chatId = state.activeConversationId
+            val listState = key(chatId) { rememberLazyListState() }
+            var followingLatest by rememberSaveable(chatId) { mutableStateOf(true) }
+            val latestUserId = messages.lastOrNull { it.role == MessageRole.USER }?.id
+            var observedUserId by remember(chatId) { mutableStateOf(latestUserId) }
             val last = messages.lastOrNull()
-            LaunchedEffect(last?.id, last?.content?.length, last?.status) {
-                if (last != null &&
-                    !justFlipped() &&
-                    listState.layoutInfo.visibleItemsInfo.any { it.index == messages.lastIndex }
-                ) {
-                    listState.scrollBy(100_000f) // clamped to the end of the content
+            // A version flip is reading in place, even if the restored branch contains a new user id.
+            val flippedAt = remember(chatId) { longArrayOf(0L) }
+            val userScroll = remember(listState) {
+                object : NestedScrollConnection {
+                    override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                        if (source == NestedScrollSource.UserInput && available.y > 0f && listState.canScrollBackward) {
+                            followingLatest = ChatScrollPolicy.afterUserScroll(followingLatest, true, false)
+                        }
+                        return Offset.Zero
+                    }
+
+                    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                        if (consumed.y < 0f && !listState.canScrollForward) {
+                            followingLatest = ChatScrollPolicy.afterUserScroll(followingLatest, false, true)
+                        }
+                        return Offset.Zero
+                    }
                 }
             }
-            // "Jump to latest" appears once the newest message is scrolled out of view.
-            val latestIndex = messages.lastIndex
-            val latestOffScreen by remember(latestIndex) {
-                derivedStateOf { listState.layoutInfo.visibleItemsInfo.none { it.index >= latestIndex } }
+            LaunchedEffect(findOpen, selectedMatch) {
+                if (findOpen) {
+                    followingLatest = false
+                    if (selectedMatch != null) listState.scrollToItem(selectedMatch)
+                }
+            }
+            LaunchedEffect(chatId, latestUserId, last?.id, last?.content?.length, last?.turnMetadata?.thinkingSummary?.length,
+                last?.status, followingLatest, findOpen) {
+                val sent = latestUserId != null && latestUserId != observedUserId
+                observedUserId = latestUserId
+                val flipped = android.os.SystemClock.uptimeMillis() - flippedAt[0] < 1_000
+                if (!findOpen && ChatScrollPolicy.shouldFollow(followingLatest, sent, flipped)) {
+                    followingLatest = true
+                    // A real end anchor works even when a single reply is taller than the entire viewport.
+                    listState.scrollToItem(messages.size)
+                }
+            }
+            val showJump by remember(listState) {
+                derivedStateOf { listState.canScrollForward && !followingLatest }
             }
             val jumpScope = rememberCoroutineScope()
             Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().nestedScroll(userScroll),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
@@ -2505,6 +2645,7 @@ private fun ChatBodyContent(
                         versionsEnabled = !state.isSending && state.editingMessageId == null,
                         onShowVersion = { target ->
                             flippedAt[0] = android.os.SystemClock.uptimeMillis()
+                            followingLatest = false
                             onShowVersion(message.id, target)
                         },
                         canRegenerate = isLast &&
@@ -2544,49 +2685,20 @@ private fun ChatBodyContent(
                                 )
                             }
                         },
-                        modifier = Modifier.widthIn(max = MESSAGE_COLUMN_MAX_WIDTH)
+                        modifier = Modifier.widthIn(max = MESSAGE_COLUMN_MAX_WIDTH).then(
+                            if (findOpen && index == selectedMatch)
+                                Modifier.border(1.dp, OrbitTheme.colors.accent, RoundedCornerShape(12.dp)).padding(6.dp)
+                            else Modifier
+                        )
                     )
                     }
                 }
-                // One-tap follow-ups under the latest finished answer. Only with an empty composer, so a
-                // tap never sends half-typed text, staged files or an edit in progress along with it.
-                val latest = messages.last()
-                val quickReplies = if (
-                    onQuickReply != null &&
-                    !state.isSending &&
-                    latest.role == MessageRole.ASSISTANT &&
-                    latest.status == MessageStatus.COMPLETED &&
-                    !latest.comparison &&
-                    state.draftText.isBlank() &&
-                    state.stagedAttachments.isEmpty() &&
-                    state.editingMessageId == null
-                ) {
-                    QuickReplies.suggest(AskPcProposals.displayText(latest.content))
-                } else {
-                    emptyList()
-                }
-                if (quickReplies.isNotEmpty() && onQuickReply != null) {
-                    item(key = "quick-replies") {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState())
-                                .animateItem()
-                        ) {
-                            quickReplies.forEach { reply ->
-                                SuggestionChip(
-                                    onClick = { onQuickReply(reply) },
-                                    label = { Text(reply) }
-                                )
-                            }
-                        }
-                    }
-                }
+                // Keep the conversation content-first, with a stable end anchor rather than suggestion chips.
+                item(key = "conversation-end") { Spacer(Modifier.height(1.dp)) }
             }
             // Qualified: the enclosing Column would otherwise pick ColumnScope.AnimatedVisibility.
             androidx.compose.animation.AnimatedVisibility(
-                visible = latestOffScreen,
+                visible = showJump && !findOpen,
                 enter = fadeIn() + scaleIn(),
                 exit = fadeOut() + scaleOut(),
                 modifier = Modifier
@@ -2596,8 +2708,8 @@ private fun ChatBodyContent(
                 SmallFloatingActionButton(
                     onClick = {
                         jumpScope.launch {
-                            listState.animateScrollToItem(latestIndex)
-                            listState.scrollBy(100_000f) // to the very end of a long answer and any reply chips
+                            followingLatest = true
+                            listState.scrollToItem(messages.size)
                         }
                     },
                     // A round button in the page colour with a thin outline, so it never reads as part of a
@@ -2607,7 +2719,7 @@ private fun ChatBodyContent(
                     contentColor = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
                 ) {
-                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Jump to latest")
+                    Icon(OrbitIcons.ChevronDown, contentDescription = stringResource(R.string.chat_jump_to_latest))
                 }
             }
             }
@@ -2658,28 +2770,6 @@ private val MESSAGE_COLUMN_MAX_WIDTH = 720.dp
 /** Your own bubble stays a bubble on wide screens instead of becoming a full-width banner. */
 private val USER_BUBBLE_MAX_WIDTH = 560.dp
 
-/** Tappable first-message ideas on an empty chat: title + hint shown, prompt placed in the composer (never sent). */
-private data class StarterPrompt(val title: String, val hint: String, val prompt: String, val icon: ImageVector)
-
-private val STARTER_PROMPTS = listOf(
-    StarterPrompt(
-        "Explain something", "A concept, a word, or how something works",
-        "Explain this in plain words: ", Icons.Outlined.Lightbulb
-    ),
-    StarterPrompt(
-        "Help me write", "An email, a message, or a cover letter",
-        "Help me write ", Icons.Outlined.EditNote
-    ),
-    StarterPrompt(
-        "Look at a file", "Summarize, check or pull out the key points",
-        "Read the file I'm attaching and pull out the key points.", Icons.Outlined.Description
-    ),
-    StarterPrompt(
-        "Make a plan", "A trip, a study week, or a project",
-        "Help me make a plan for ", Icons.Outlined.CalendarMonth
-    )
-)
-
 private data class OnboardingChoice(
     val preset: ProviderPreset,
     val title: String,
@@ -2688,13 +2778,13 @@ private data class OnboardingChoice(
 )
 
 private val ONBOARDING_CHOICES = listOf(
-    OnboardingChoice(ProviderPreset.LM_STUDIO, "On my PC with LM Studio", "Free and private. No key needed.", Icons.Outlined.Computer),
+    OnboardingChoice(ProviderPreset.LM_STUDIO, "On my PC with LM Studio", "Free and private. No key needed.", OrbitIcons.Computer),
     OnboardingChoice(ProviderPreset.OLLAMA, "On my PC with Ollama", "Free and private. No key needed.", Icons.Outlined.Terminal),
     OnboardingChoice(
         ProviderPreset.GOOGLE_GEMINI, "Google Gemini", "Gemini models with your own AI Studio API key.",
         Icons.Outlined.AutoAwesome
     ),
-    OnboardingChoice(ProviderPreset.CUSTOM, "Another service", "Any OpenAI-compatible URL and key.", Icons.Outlined.Cloud)
+    OnboardingChoice(ProviderPreset.CUSTOM, "Another service", "Any OpenAI-compatible URL and key.", OrbitIcons.Cloud)
 )
 
 /**
@@ -2754,6 +2844,7 @@ private fun StartCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EmptyChatPlaceholder(
     modelId: String,
@@ -2790,6 +2881,7 @@ private fun EmptyChatPlaceholder(
         scope.launch(Dispatchers.IO) { runCatching { personaStore.save(updated) } }
     }
     val persona = Personas.matching(systemPrompt, customPersonas)
+    var showAssistants by rememberSaveable { mutableStateOf(false) }
     val customInstructions = Personas.hasCustomInstructions(systemPrompt, customPersonas)
     if (showImport && onPickPersona != null) {
         ImportPersonaDialog(
@@ -2845,7 +2937,6 @@ private fun EmptyChatPlaceholder(
     }
     val orbit = OrbitTheme.colors
     val now = rememberLocalMinute()
-    val subline = rememberSaveable { StartGreeting.SUBLINES.random() }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -2856,14 +2947,13 @@ private fun EmptyChatPlaceholder(
         // Spare height splits 2:3 above and below, so the greeting sits about 40% down rather than dead centre.
         // When the content is taller than the screen both spacers shrink to nothing and the page scrolls.
         Spacer(Modifier.weight(2f))
-        HorizonArc(time = now)
-        Spacer(Modifier.height(18.dp))
+        if (!configured) { HorizonArc(time = now); Spacer(Modifier.height(18.dp)) }
         Text(
             text = when {
                 !configured -> "Welcome to Orbit"
                 temporary -> TemporaryChatCopy.TITLE
                 project != null -> project.name
-                else -> StartGreeting.greeting(now.hour, firstName)
+                else -> if (firstName.isNullOrBlank()) "What can I help with?" else StartGreeting.greeting(now.hour, firstName)
             },
             style = MaterialTheme.typography.headlineMedium,
             color = orbit.text,
@@ -2879,7 +2969,7 @@ private fun EmptyChatPlaceholder(
                     shown != null -> shown.greeting
                     customInstructions -> "Your own chat instructions are on."
                     project != null -> ProjectCopy.startLine(project)
-                    else -> subline
+                    else -> "Ask anything, or start with an idea below."
                 },
                 style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp),
                 color = orbit.muted,
@@ -2890,8 +2980,13 @@ private fun EmptyChatPlaceholder(
         if (configured) {
             // A persona never overwrites instructions the user wrote; those are edited in Chat instructions.
             if (onPickPersona != null && !customInstructions) {
-                Spacer(Modifier.height(18.dp))
-                PersonaPicker(
+                Spacer(Modifier.height(12.dp))
+                TextButton(onClick = { showAssistants = !showAssistants }) {
+                    Text(persona?.let { "Assistant: "+it.name } ?: "Choose an assistant")
+                    Icon(if (showAssistants) Icons.Filled.KeyboardArrowUp else OrbitIcons.ChevronDown,
+                        contentDescription = null, modifier = Modifier.size(16.dp))
+                }
+                if (showAssistants) PersonaPicker(
                     active = persona,
                     onPick = onPickPersona,
                     modifier = Modifier.bleedHorizontally(20.dp),
@@ -2899,7 +2994,7 @@ private fun EmptyChatPlaceholder(
                     custom = customPersonas,
                     onCreate = { editingPersona = null; showEditor = true }
                 )
-                if (persona != null) {
+                if (showAssistants && persona != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         TextButton(onClick = { sharePersona(context, persona) }) {
                             Icon(Icons.Outlined.Share, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -2947,40 +3042,17 @@ private fun EmptyChatPlaceholder(
                 textAlign = TextAlign.Center
             )
             TextButton(onClick = onOpenSettings) { Text("All providers and settings") }
-        } else {
-            // One card per row with large system fonts so titles are not cut off.
-            val perRow = if (LocalDensity.current.fontScale > LARGE_FONT_SCALE) 1 else 2
-            // A persona brings its own ideas; plain Hydrogen and custom instructions keep the general ones.
-            Crossfade(targetState = persona, label = "persona-starters") { shown ->
-                val starters = shown?.starters?.takeIf { it.isNotEmpty() }
-                    ?.map { StarterPrompt(it.title, it.hint, it.prompt, starterIcon(it.icon)) }
-                    ?: STARTER_PROMPTS
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier
-                        .widthIn(max = 420.dp)
-                        .fillMaxWidth()
-                ) {
-                    starters.chunked(perRow).forEach { pair ->
-                        // Equal-height cards in each row, however the text wraps.
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.height(IntrinsicSize.Min)
-                        ) {
-                            pair.forEach { starter ->
-                                StartCard(
-                                    icon = starter.icon,
-                                    title = starter.title,
-                                    detail = starter.hint,
-                                    onClick = { onUsePrompt(starter.prompt) },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(),
-                                    stacked = true
-                                )
-                            }
-                        }
-                    }
+        } else if (!temporary && project == null) {
+            FlowRow(
+                modifier = Modifier.widthIn(max = 420.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf("Help me write" to "Help me write ",
+                    "Explain a concept" to "Explain ",
+                    "Make a plan" to "Help me make a plan for ",
+                    "Write code" to "Help me write code for ").forEach { (label, prompt) ->
+                    SuggestionChip(onClick = { onUsePrompt(prompt) }, label = { Text(label) })
                 }
             }
         }
@@ -3203,15 +3275,16 @@ private fun MessageItem(
                             leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
                             onClick = {
                                 menuOpen = false
-                                context.getSystemService(ClipboardManager::class.java)
-                                    ?.setPrimaryClip(ClipData.newPlainText("Orbit message", message.content))
-                                Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                                val copied = copyOrbitText(context, "Orbit message", message.content)
+                                if (!copied || android.os.Build.VERSION.SDK_INT < 33) {
+                                    Toast.makeText(context, if (copied) R.string.markdown_copied else R.string.markdown_copy_failed, Toast.LENGTH_SHORT).show()
+                                }
                             }
                         )
                         if (canEdit) {
                             OrbitMenuItem(
                                 text = { Text("Edit and resend") },
-                                leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) },
+                                leadingIcon = { Icon(OrbitIcons.Edit, contentDescription = null) },
                                 onClick = {
                                     menuOpen = false
                                     onEdit()
@@ -3274,6 +3347,10 @@ private fun MessageItem(
                 // A regenerated reply's versions sit at the end of its header line: the action row under the
                 // newest reply is already full on a phone.
                 VersionSwitcher(message, versionsEnabled, onShowVersion)
+            }
+            message.requestProfile?.let { profile ->
+                Text(profile.detail(), style = MaterialTheme.typography.labelSmall,
+                    color = OrbitTheme.colors.muted)
             }
             MessageAttachments(message)
             MessageStatusContent(message, isSending, onRetry, showBody = true, onOpenSettings = onOpenSettings)
@@ -3376,7 +3453,7 @@ private fun ThoughtLine(messageId: String, thinking: String, live: Boolean, thin
             Spacer(Modifier.width(8.dp))
             Text(text = label, style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp), color = orbit.muted)
             Icon(
-                if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                if (open) OrbitIcons.ChevronUp else OrbitIcons.ChevronDown,
                 contentDescription = null,
                 tint = orbit.muted,
                 modifier = Modifier.padding(start = 2.dp).size(18.dp)
@@ -3630,7 +3707,11 @@ private fun MessageStatusContent(
                         add("Tools requested: ${meta.toolCalls.joinToString(", ") { it.name }}")
                     }
                     if (meta.isTruncated) {
-                        add("Truncated (${meta.finishReason ?: "max tokens"})")
+                        add(when (meta.finishReason) {
+                            "stream_interrupted" -> "Connection ended early. Partial reply saved."
+                            "tool_call_incomplete" -> "An incomplete tool request was discarded."
+                            else -> "Reply reached its output limit"
+                        })
                     }
                 }.joinToString(" · ")
                 Text(text = metaNotes, style = MaterialTheme.typography.labelSmall, color = muted)
@@ -3639,7 +3720,7 @@ private fun MessageStatusContent(
     }
 }
 
-/** Quiet icon row under a finished reply: copy, and regenerate on the latest answer. */
+/** Compact reply actions, with secondary tools kept in a real overflow menu. */
 @Composable
 private fun MessageActions(
     message: ChatMessage,
@@ -3657,76 +3738,109 @@ private fun MessageActions(
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
     val tint = OrbitTheme.colors.muted
-    Row(modifier = Modifier.offset(x = (-8).dp)) {
-        if (copyText.isNotEmpty()) {
-            IconButton(
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    context.getSystemService(ClipboardManager::class.java)
-                        ?.setPrimaryClip(ClipData.newPlainText("Orbit message", copyText))
-                    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
-                },
-                // 48dp: the accessibility minimum touch target (36dp overlapped its neighbour).
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy", tint = tint, modifier = Modifier.size(18.dp))
-            }
-        }
-        if (shareText != null) {
-            IconButton(
-                onClick = {
-                    val send = Intent(Intent.ACTION_SEND)
-                        .setType("text/plain")
-                        .putExtra(Intent.EXTRA_TEXT, shareText)
-                    runCatching { context.startActivity(Intent.createChooser(send, "Share answer")) }
-                        .onFailure { Toast.makeText(context, "No app can share text", Toast.LENGTH_SHORT).show() }
-                },
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.Outlined.Share, contentDescription = "Share", tint = tint, modifier = Modifier.size(18.dp))
-            }
-        }
-        if (message.role == MessageRole.ASSISTANT && message.content.isNotBlank()) {
-            // ORBIT_DESIGN "Read aloud": the button becomes Stop while speaking. The 32 dp accent-soft disc marks
-            // the one reply being read; the 48 dp button around it keeps the touch target.
-            IconButton(onClick = onToggleSpeak, modifier = Modifier.size(48.dp)) {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(if (isSpeaking) OrbitTheme.colors.accentSoft else Color.Transparent)
-                ) {
-                    Icon(
-                        if (isSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
-                        contentDescription = if (isSpeaking) "Stop reading" else "Read aloud",
-                        tint = if (isSpeaking) OrbitTheme.colors.accent else tint,
-                        modifier = Modifier.size(18.dp)
-                    )
+    val available = buildList {
+        if (copyText.isNotEmpty()) add(ReplyAction.COPY)
+        if (message.role == MessageRole.ASSISTANT && message.content.isNotBlank()) add(ReplyAction.READ)
+        if (canRegenerate) add(ReplyAction.RETRY)
+        if (shareText != null) add(ReplyAction.SHARE)
+        if (onCompare != null) add(ReplyAction.COMPARE)
+        if (onBranch != null) add(ReplyAction.BRANCH)
+    }
+    if (available.isEmpty()) return
+
+    fun enabled(action: ReplyAction): Boolean =
+        !isSending || action !in setOf(ReplyAction.RETRY, ReplyAction.COMPARE, ReplyAction.BRANCH)
+
+    fun perform(action: ReplyAction) {
+        when (action) {
+            ReplyAction.COPY -> {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                val copied = copyOrbitText(context, "Orbit message", copyText)
+                if (!copied || android.os.Build.VERSION.SDK_INT < 33) {
+                    Toast.makeText(context, if (copied) R.string.markdown_copied else R.string.markdown_copy_failed, Toast.LENGTH_SHORT).show()
                 }
             }
-        }
-        if (canRegenerate) {
-            IconButton(onClick = onRetry, enabled = !isSending, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Default.Refresh, contentDescription = "Try again", tint = tint, modifier = Modifier.size(18.dp))
+            ReplyAction.READ -> onToggleSpeak()
+            ReplyAction.RETRY -> onRetry()
+            ReplyAction.SHARE -> {
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_TEXT, shareText.orEmpty())
+                runCatching { context.startActivity(Intent.createChooser(send, context.getString(R.string.reply_share_title))) }
+                    .onFailure { Toast.makeText(context, R.string.reply_share_failed, Toast.LENGTH_SHORT).show() }
+            }
+            ReplyAction.COMPARE -> onCompare?.invoke()
+            ReplyAction.BRANCH -> {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                onBranch?.invoke()
             }
         }
-        if (onCompare != null) {
-            IconButton(onClick = onCompare, enabled = !isSending, modifier = Modifier.size(48.dp)) {
-                Icon(Icons.Outlined.Compare, contentDescription = "Ask another model", tint = tint, modifier = Modifier.size(18.dp))
+    }
+
+    fun label(action: ReplyAction): Int = when (action) {
+        ReplyAction.COPY -> R.string.markdown_copy
+        ReplyAction.READ -> if (isSpeaking) R.string.reply_stop_reading else R.string.reply_read_aloud
+        ReplyAction.RETRY -> R.string.reply_try_again
+        ReplyAction.SHARE -> R.string.reply_share
+        ReplyAction.COMPARE -> R.string.reply_compare
+        ReplyAction.BRANCH -> R.string.reply_branch
+    }
+
+    fun icon(action: ReplyAction): ImageVector = when (action) {
+        ReplyAction.COPY -> Icons.Outlined.ContentCopy
+        ReplyAction.READ -> if (isSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp
+        ReplyAction.RETRY -> Icons.Default.Refresh
+        ReplyAction.SHARE -> Icons.Outlined.Share
+        ReplyAction.COMPARE -> Icons.Outlined.Compare
+        ReplyAction.BRANCH -> Icons.AutoMirrored.Outlined.AltRoute
+    }
+
+    var menuOpen by remember(message.id) { mutableStateOf(false) }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val plan = ReplyActionLayout.plan(available, maxWidth.value)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            for (action in plan.inline) {
+                val speaking = action == ReplyAction.READ && isSpeaking
+                IconButton(
+                    onClick = { perform(action) },
+                    enabled = enabled(action),
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.size(32.dp).clip(CircleShape)
+                            .background(if (speaking) OrbitTheme.colors.accentSoft else Color.Transparent)
+                    ) {
+                        Icon(
+                            icon(action),
+                            contentDescription = stringResource(label(action)),
+                            tint = if (speaking) OrbitTheme.colors.accent else tint,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
-        }
-        if (onBranch != null) {
-            IconButton(
-                onClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onBranch()
-                    Toast.makeText(context, "Branched into a new chat", Toast.LENGTH_SHORT).show()
-                },
-                enabled = !isSending,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.AutoMirrored.Outlined.AltRoute, contentDescription = "Branch from here", tint = tint, modifier = Modifier.size(18.dp))
+            if (plan.overflow.isNotEmpty()) {
+                Box {
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
+                        Icon(
+                            Icons.Default.MoreHoriz,
+                            contentDescription = stringResource(R.string.reply_more_actions),
+                            tint = tint,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    OrbitMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        for (action in plan.overflow) {
+                            OrbitMenuItem(
+                                text = { Text(stringResource(label(action))) },
+                                leadingIcon = { Icon(icon(action), contentDescription = null) },
+                                enabled = enabled(action),
+                                onClick = { menuOpen = false; perform(action) }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -3784,12 +3898,19 @@ private fun ComposerBar(
     onCancelEdit: () -> Unit = {},
     contextUsage: ContextUsage? = null,
     onStartVoiceChat: (() -> Unit)? = null,
-    dictation: InAppSpeech? = null
+    dictation: InAppSpeech? = null,
+    reasoningMode: com.hydrogen.ai.model.ReasoningMode = com.hydrogen.ai.model.ReasoningMode.AUTO,
+    reasoningChoices: List<com.hydrogen.ai.model.ReasoningMode> = emptyList(),
+    cleanApisBudget: Boolean = false,
+    onReasoningMode: (com.hydrogen.ai.model.ReasoningMode) -> Unit = {},
+    modelLabel: String = "",
+    onSwitchModel: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     val orbit = OrbitTheme.colors
+    val space = OrbitTheme.space
     val keyboardController = LocalSoftwareKeyboardController.current
     val promptStore = remember(context) {
         PromptLibraryStore(File(context.filesDir, "hydrogen_prompts.json"))
@@ -3798,14 +3919,36 @@ private fun ComposerBar(
     var fillingTemplate by remember { mutableStateOf<SavedPrompt?>(null) }
     var importingPack by remember { mutableStateOf(false) }
     var showAttachMenu by remember { mutableStateOf(false) }
-    var prompts by remember { mutableStateOf(PromptLibrary.starterPrompts) }
-    LaunchedEffect(promptStore) {
-        prompts = withContext(Dispatchers.IO) { promptStore.load() }
+    var showReasoningMenu by remember { mutableStateOf(false) }
+    var prompts by remember(promptStore) { mutableStateOf(emptyList<SavedPrompt>()) }
+    var promptsReady by remember(promptStore) { mutableStateOf(false) }
+    var promptsBusy by remember(promptStore) { mutableStateOf(true) }
+    var promptLoadAttempt by remember(promptStore) { mutableIntStateOf(0) }
+    var promptError by remember(promptStore) { mutableStateOf<String?>(null) }
+    val loadError = stringResource(R.string.saved_prompts_load_failed)
+    val saveError = stringResource(R.string.saved_prompts_save_failed)
+    val conflictError = stringResource(R.string.saved_prompts_conflict)
+    LaunchedEffect(promptStore, promptLoadAttempt) {
+        promptsBusy = true
+        promptError = null
+        val result = withContext(Dispatchers.IO) { runCatching { promptStore.loadForEditing() } }
+        result.onSuccess { prompts = it; promptsReady = true }
+            .onFailure { promptsReady = false; promptError = loadError }
+        promptsBusy = false
     }
     val updatePrompts: (List<SavedPrompt>) -> Unit = { updated ->
-        prompts = updated
-        scope.launch(Dispatchers.IO) {
-            runCatching { promptStore.save(updated) }
+        if (promptsReady && !promptsBusy && updated != prompts) {
+            val expected = prompts
+            promptsBusy = true
+            promptError = null
+            scope.launch {
+                try {
+                    val result = withContext(Dispatchers.IO) { runCatching { promptStore.saveIfUnchanged(expected, updated) } }
+                    result.onSuccess { saved ->
+                        if (saved) prompts = updated else { promptsReady = false; promptError = conflictError }
+                    }.onFailure { promptError = saveError }
+                } finally { promptsBusy = false }
+            }
         }
     }
     Column(
@@ -3817,7 +3960,7 @@ private fun ComposerBar(
             // Wide screens: keep the composer lined up with the centred message column.
             .wrapContentWidth(Alignment.CenterHorizontally)
             .widthIn(max = MESSAGE_COLUMN_MAX_WIDTH + 24.dp)
-            .padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 6.dp),
+            .padding(start = space.m, end = space.m, top = space.xs, bottom = space.s),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         ContextMeterRow(usage = contextUsage)
@@ -3862,6 +4005,10 @@ private fun ComposerBar(
             PromptLibraryDialog(
                 prompts = prompts,
                 canSaveDraft = draftText.isNotBlank(),
+                ready = promptsReady,
+                busy = promptsBusy,
+                error = promptError,
+                onReload = { promptLoadAttempt++ },
                 onInsert = { prompt ->
                     if (PromptTemplate.variables(prompt.text).isEmpty()) {
                         onDraftChange(PromptLibrary.insertIntoDraft(draftText, prompt.text))
@@ -3912,7 +4059,7 @@ private fun ComposerBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    Icons.Outlined.Edit,
+                    OrbitIcons.Edit,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier.size(16.dp)
@@ -3929,14 +4076,14 @@ private fun ComposerBar(
                 }
             }
         }
-        val cardShape = RoundedCornerShape(28.dp)
+        val cardShape = OrbitTheme.shapes.xxl
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(cardShape)
                 .background(orbit.raised)
                 .border(1.dp, orbit.line, cardShape)
-                .padding(top = 12.dp, bottom = 6.dp)
+                .padding(top = space.m, bottom = space.s)
         ) {
             val fieldStyle = MaterialTheme.typography.bodyLarge.copy(color = orbit.text)
             val fieldModifier = Modifier
@@ -3983,12 +4130,62 @@ private fun ComposerBar(
                     decorationBox = { inner ->
                         Box {
                             if (draftText.isEmpty()) {
-                                Text(text = "Message Orbit", style = fieldStyle.copy(color = orbit.faint))
+                                Text(text = "Ask anything", style = fieldStyle.copy(color = orbit.faint))
                             }
                             inner()
                         }
                     }
                 )
+            }
+            val configuration = LocalConfiguration.current
+            val compactControls = configuration.screenWidthDp >= 360 && configuration.fontScale <= LARGE_FONT_SCALE
+            val modelControls: @Composable RowScope.() -> Unit = {
+                    TextButton(onClick = onSwitchModel, modifier = Modifier.weight(1f).semantics { contentDescription = "Switch model: $modelLabel" },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
+                        Text(modelLabel.ifBlank { "Select model" }, maxLines = 1, overflow = TextOverflow.Ellipsis, color = orbit.muted,
+                            style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f, fill = false))
+                        Icon(OrbitIcons.ChevronDown, contentDescription = null, tint = orbit.muted, modifier = Modifier.size(16.dp))
+                    }
+                if (reasoningChoices.size > 1 && !isSending) {
+                    val effectiveMode = reasoningMode.takeIf { it in reasoningChoices } ?: com.hydrogen.ai.model.ReasoningMode.AUTO
+                    Box {
+                        TextButton(onClick = { showReasoningMenu = true },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                            modifier = Modifier.semantics { contentDescription = "${if (cleanApisBudget) "Completion token budget" else "Reasoning effort"}: ${effectiveMode.label}" }) {
+                            Text(if (cleanApisBudget) "Budget: ${effectiveMode.label}" else "Think: ${effectiveMode.label}", color = orbit.text, style = MaterialTheme.typography.labelMedium)
+                            Icon(OrbitIcons.ChevronDown, contentDescription = null, tint = orbit.muted,
+                                modifier = Modifier.size(16.dp))
+                        }
+                        OrbitMenu(expanded = showReasoningMenu, onDismissRequest = { showReasoningMenu = false }) {
+                            Text(if (cleanApisBudget) "Completion budget" else "Reasoning effort",
+                                style = MaterialTheme.typography.titleSmall, color = orbit.text,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                            if (cleanApisBudget) Text("Budget is not a native thinking level.",
+                                style = MaterialTheme.typography.labelSmall, color = orbit.muted,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                            com.hydrogen.ai.model.ReasoningMode.entries.forEach { mode ->
+                                val supported = mode in reasoningChoices
+                                OrbitMenuItem(
+                                    enabled = supported,
+                                    trailingIcon = if (mode == effectiveMode) { { Icon(OrbitIcons.Check, contentDescription = "Selected") } } else null,
+                                    text = {
+                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Text(mode.label)
+                                            Text(if (supported) reasoningDetail(mode, cleanApisBudget) else "Not supported by this model",
+                                                style = MaterialTheme.typography.labelSmall, color = orbit.muted)
+                                        }
+                                    },
+                                    onClick = { showReasoningMenu = false; onReasoningMode(mode) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            if (!compactControls && dictation == null && !isSending && (modelLabel.isNotBlank() || reasoningChoices.size > 1)) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = space.s), verticalAlignment = Alignment.CenterVertically) {
+                    modelControls()
+                }
             }
             Spacer(Modifier.height(4.dp))
             if (dictation != null) {
@@ -4020,7 +4217,7 @@ private fun ComposerBar(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            Icons.Rounded.Add,
+                            OrbitIcons.Add,
                             contentDescription = null,
                             tint = if (isSending) orbit.faint else orbit.text,
                             modifier = Modifier.size(20.dp)
@@ -4051,18 +4248,22 @@ private fun ComposerBar(
                         )
                     }
                 }
-                Spacer(Modifier.weight(1f))
+                if (compactControls && !isSending && (modelLabel.isNotBlank() || reasoningChoices.size > 1)) {
+                    modelControls()
+                } else {
+                    Spacer(Modifier.weight(1f))
+                }
                 if (voiceAvailable && !isSending) {
                     IconButton(onClick = {
                         keyboardController?.hide()
                         onVoiceInput()
                     }) {
-                        Icon(Icons.Rounded.Mic, contentDescription = "Dictate", tint = orbit.muted)
+                        Icon(OrbitIcons.Mic, contentDescription = "Dictate", tint = orbit.muted)
                     }
                 }
                 when {
                     isSending -> SunButton(
-                        icon = Icons.Rounded.ArrowUpward,
+                        icon = OrbitIcons.ArrowUpward,
                         contentDescription = "Stop response",
                         onClick = onCancelSend,
                         stopping = true
@@ -4078,7 +4279,7 @@ private fun ComposerBar(
                         }
                     )
                     else -> SunButton(
-                        icon = Icons.Rounded.ArrowUpward,
+                        icon = OrbitIcons.ArrowUpward,
                         contentDescription = if (isEditing) "Send edited message" else "Send message",
                         enabled = draftText.isNotBlank() || stagedAttachments.isNotEmpty(),
                         onClick = {
@@ -4102,6 +4303,7 @@ private fun ComposerBar(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PromptLibraryDialog(
     prompts: List<SavedPrompt>,
@@ -4112,8 +4314,16 @@ private fun PromptLibraryDialog(
     onDismiss: () -> Unit,
     onAddExamples: () -> Unit = {},
     onShare: () -> Unit = {},
-    onImport: () -> Unit = {}
+    onImport: () -> Unit = {},
+    ready: Boolean = true,
+    busy: Boolean = false,
+    error: String? = null,
+    onReload: () -> Unit = {}
 ) {
+    var search by rememberSaveable { mutableStateOf("") }
+    var deleteTarget by remember { mutableStateOf<SavedPrompt?>(null) }
+    val filtered = remember(prompts, search) { PromptLibrary.search(prompts, search) }
+    val editable = ready && !busy
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Saved prompts") },
@@ -4125,42 +4335,53 @@ private fun PromptLibraryDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                if (prompts.isEmpty()) {
-                    Text("No saved prompts yet.", style = MaterialTheme.typography.bodyMedium)
+                if (busy) Text(stringResource(if (ready) R.string.saved_prompts_saving else R.string.saved_prompts_loading),
+                    style = MaterialTheme.typography.bodySmall)
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                if ((!ready || error != null) && !busy) TextButton(onClick = onReload) { Text(stringResource(R.string.saved_prompts_retry)) }
+                if (prompts.isNotEmpty() || search.isNotBlank()) {
+                    OrbitSearchField(search, { search = it }, stringResource(R.string.saved_prompts_search),
+                        stringResource(R.string.saved_prompts_clear_search))
+                }
+                if (ready && filtered.isEmpty()) {
+                    Text(if (prompts.isEmpty()) "No saved prompts yet." else stringResource(R.string.saved_prompts_no_results),
+                        style = MaterialTheme.typography.bodyMedium)
                 }
                 val missingExamples = PromptTemplate.EXAMPLES.any { ex -> prompts.none { it.text.trim() == ex.trim() } }
-                if (missingExamples) {
-                    TextButton(onClick = onAddExamples) { Text("Add fill-in-the-blank templates") }
+                if (ready && missingExamples) {
+                    TextButton(onClick = onAddExamples, enabled = editable) { Text("Add fill-in-the-blank templates") }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = onShare, enabled = prompts.isNotEmpty()) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = onShare, enabled = ready && prompts.isNotEmpty()) {
                         Text(if (prompts.size > PromptPackCodec.MAX_PROMPTS) "Share first ${PromptPackCodec.MAX_PROMPTS}" else "Share all")
                     }
-                    TextButton(onClick = onImport) { Text("Import pack") }
+                    TextButton(onClick = onImport, enabled = editable) { Text("Import pack") }
                 }
                 val listState = rememberLazyListState()
                 // A newly saved prompt goes to the top; keep it in view instead of keeping the old scroll anchor.
-                LaunchedEffect(prompts.firstOrNull()?.id) { listState.scrollToItem(0) }
-                LazyColumn(state = listState, modifier = Modifier.heightIn(max = 360.dp)) {
-                    items(prompts, key = { it.id }) { prompt ->
+                LaunchedEffect(filtered.firstOrNull()?.id, search) {
+                    if (filtered.isNotEmpty()) listState.scrollToItem(0)
+                }
+                LazyColumn(state = listState, modifier = Modifier.heightIn(max = 240.dp)) {
+                    items(filtered, key = { it.id }) { prompt ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             TextButton(
                                 onClick = { onInsert(prompt) },
+                                enabled = ready,
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text(
-                                    text = prompt.title,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
+                                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(prompt.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(PromptLibrary.preview(prompt), maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
-                            IconButton(onClick = { onDelete(prompt) }) {
+                            IconButton(onClick = { deleteTarget = prompt }, enabled = editable) {
                                 Icon(
-                                    imageVector = Icons.Default.DeleteOutline,
+                                    imageVector = OrbitIcons.Delete,
                                     contentDescription = "Delete prompt ${prompt.title}"
                                 )
                             }
@@ -4170,7 +4391,7 @@ private fun PromptLibraryDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onSaveDraft, enabled = canSaveDraft) {
+            TextButton(onClick = onSaveDraft, enabled = editable && canSaveDraft) {
                 Text("Save current message")
             }
         },
@@ -4178,6 +4399,15 @@ private fun PromptLibraryDialog(
             TextButton(onClick = onDismiss) { Text("Close") }
         }
     )
+    deleteTarget?.let { target ->
+        AlertDialog(onDismissRequest = { deleteTarget = null },
+            title = { Text(stringResource(R.string.saved_prompts_delete_title)) },
+            text = { Text(target.title) },
+            confirmButton = { TextButton(onClick = { deleteTarget = null; onDelete(target) }, enabled = editable) {
+                Text(stringResource(R.string.saved_prompts_delete))
+            } },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text(stringResource(R.string.saved_prompts_cancel)) } })
+    }
 }
 
 private fun readinessSummary(readiness: ProviderReadiness): String = when {
@@ -4227,7 +4457,7 @@ private fun StagedPhoto(item: AttachmentManifestItem, enabled: Boolean, onRemove
                 .semantics { contentDescription = "Remove ${item.displayName}" }
         ) {
             Icon(
-                imageVector = Icons.Default.Close,
+                imageVector = OrbitIcons.Close,
                 contentDescription = null,
                 tint = if (enabled) orbit.text else orbit.muted,
                 modifier = Modifier.size(12.dp)
