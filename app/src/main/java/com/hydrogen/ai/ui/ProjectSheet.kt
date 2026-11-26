@@ -124,7 +124,7 @@ fun ProjectChatBanner(name: String, onClick: () -> Unit, modifier: Modifier = Mo
                 modifier = Modifier.padding(start = 10.dp, end = 14.dp, top = 6.dp, bottom = 6.dp)
             ) {
                 Icon(
-                    Icons.Outlined.Folder,
+                    com.hydrogen.ai.ui.OrbitIcons.Folder,
                     contentDescription = null,
                     tint = orbit.muted,
                     modifier = Modifier.size(14.dp)
@@ -220,7 +220,7 @@ fun ProjectSheet(
             }
             val unprocessed = uniqueUris.size - budget.attempted
             val summary = buildList {
-                add(context.getString(R.string.project_import_added, budget.added))
+                add(context.resources.getQuantityString(R.plurals.project_import_added, budget.added, budget.added))
                 if (problems.isNotEmpty()) add(context.getString(R.string.project_import_failed_count, problems.size, problems.first()))
                 if (unprocessed > 0) {
                     add(context.getString(
@@ -361,9 +361,9 @@ fun ProjectSheet(
                 }
                 Spacer(Modifier.weight(1f))
                 if (project == null) {
-                    Button(onClick = { onCreate(name, instructions) }, enabled = nameOk) { Text(ProjectCopy.CREATE) }
+                    Button(shape = com.hydrogen.ai.ui.OrbitButtonShape, onClick = { onCreate(name, instructions) }, enabled = nameOk) { Text(ProjectCopy.CREATE) }
                 } else {
-                    Button(onClick = saveAndClose, enabled = nameOk && !reading) { Text(ProjectCopy.DONE) }
+                    Button(shape = com.hydrogen.ai.ui.OrbitButtonShape, onClick = saveAndClose, enabled = nameOk && !reading) { Text(ProjectCopy.DONE) }
                 }
             }
         }
@@ -470,7 +470,7 @@ private fun ProjectFilesSection(
                 modifier = Modifier.padding(start = 14.dp, top = 6.dp, bottom = 6.dp, end = 4.dp)
             ) {
                 Icon(
-                    Icons.Outlined.Description,
+                    com.hydrogen.ai.ui.OrbitIcons.File,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)

@@ -13,7 +13,7 @@ object ConversationMarkdownExporter {
     fun export(conversation: Conversation): String = buildString {
         val title = headingSafe(conversation.title).ifBlank { "Orbit chat" }
         append("# ").append(title).append('\n')
-        append('\n').append("_Exported from Orbit · model: ")
+        append('\n').append("_Exported from Orbit, model: ")
             .append(headingSafe(conversation.modelId)).append("_\n")
 
         conversation.messages.forEach { message ->

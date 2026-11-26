@@ -27,7 +27,7 @@ object ErrorExplainer {
         val keyStep = keyPage?.let { "You can make a new key at ${hostOf(it)}." }
         return when (error.category) {
             ProviderErrorCategory.UNCONFIGURED -> listOf(
-                "Open Models & API keys.",
+                "Open Models and providers.",
                 "Pick a service and paste its key, or connect a model on your PC."
             )
             ProviderErrorCategory.PREFLIGHT_BLOCKED -> listOf(
@@ -44,17 +44,17 @@ object ErrorExplainer {
                 "If it keeps happening, tap Copy details and keep it for help."
             )
             ProviderErrorCategory.UNAUTHORIZED_RELAY_401 -> listOf(
-                "Open Models & API keys.",
+                "Open Models and providers.",
                 "Paste the key your server expects. If your server doesn't use a key, clear it."
             )
             ProviderErrorCategory.UNAUTHORIZED_UPSTREAM_401 -> listOfNotNull(
-                "Open Models & API keys and paste your key again, with nothing before or after it.",
+                "Open Models and providers and paste your key again, with nothing before or after it.",
                 "Check that the key is for $svc and that it hasn't been deleted.",
                 keyStep
             )
             ProviderErrorCategory.FORBIDDEN_403 -> listOfNotNull(
                 "Check that your key can use this model. Some models need a paid plan or a verified account.",
-                "Pick another model, or tap Load models to see what your key can use.",
+                "Pick another model, or tap Find models to see what your key can use.",
                 keyStep
             )
             ProviderErrorCategory.CONTENT_FILTERED -> listOf(
@@ -76,7 +76,7 @@ object ErrorExplainer {
             ProviderErrorCategory.NETWORK_TIMEOUT -> networkSteps(error.sourceLayer, ownServer)
             ProviderErrorCategory.CANCELLED -> listOf("Tap Retry to send it again.")
             ProviderErrorCategory.UNKNOWN_PROTOCOL -> listOf(
-                "Check the server address in Models & API keys.",
+                "Check the server address in Models and providers.",
                 "Check that the format matches the service: most use the OpenAI format, Claude models use the Anthropic format.",
                 "If it keeps happening, tap Copy details and keep it for help."
             )
@@ -88,11 +88,11 @@ object ErrorExplainer {
             ProviderErrorCategory.MODEL_NOT_FOUND -> if (ownServer) {
                 listOf(
                     "Make sure the model is downloaded and loaded in LM Studio or Ollama.",
-                    "Then open Models & API keys and tap Load models."
+                    "Then open Models and providers and tap Find models."
                 )
             } else {
                 listOf(
-                    "Open Models & API keys and tap Load models to see what your key can use.",
+                    "Open Models and providers and tap Find models to see what your key can use.",
                     "Pick one of those models, or check the spelling of the model name."
                 )
             }
@@ -123,7 +123,7 @@ object ErrorExplainer {
     private fun networkSteps(layer: String, ownServer: Boolean): List<String> = when (layer) {
         NetworkErrorClassifier.DNS -> listOf(
             "Check that Wi-Fi or mobile data is on.",
-            "If you typed the address, check its spelling in Models & API keys."
+            "If you typed the address, check its spelling in Models and providers."
         )
         NetworkErrorClassifier.REFUSED -> if (ownServer) {
             listOf(
@@ -133,7 +133,7 @@ object ErrorExplainer {
             )
         } else {
             listOf(
-                "Check the address in Models & API keys.",
+                "Check the address in Models and providers.",
                 "Wait a moment, then tap Retry."
             )
         }
@@ -154,7 +154,7 @@ object ErrorExplainer {
         )
         NetworkErrorClassifier.UNREACHABLE -> listOf(
             "Check that this phone and the server are on the same network.",
-            "Check the address in Models & API keys."
+            "Check the address in Models and providers."
         )
         else -> if (ownServer) {
             listOf(

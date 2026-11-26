@@ -60,7 +60,7 @@ class ChatSearchTest {
     @Test
     fun plainReadsTablesAndListsAsWords() {
         val md = "| Option | Cost |\n|---|:---:|\n| Train | Low |\n\n## Day 2\n- **Morning:** train\n> quoted\n---\n1. One"
-        assertEquals("Option · Cost Train · Low Day 2 Morning: train quoted 1. One", ChatSearch.plain(md))
+        assertEquals("Option, Cost Train, Low Day 2 Morning: train quoted 1. One", ChatSearch.plain(md))
     }
 
     @Test

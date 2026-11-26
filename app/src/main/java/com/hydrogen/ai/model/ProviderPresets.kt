@@ -1,6 +1,6 @@
 package com.hydrogen.ai.model
 
-/** Where a provider card is listed in "Models & API keys". */
+/** Where a provider card is listed in "Models and providers". */
 enum class PresetGroup(val label: String) {
     HOSTED("Online services"),
     PC("On your PC"),
@@ -8,7 +8,7 @@ enum class PresetGroup(val label: String) {
 }
 
 /**
- * User-facing provider choices for the "Models & API keys" sheet. Each preset maps onto a [ProviderRoute].
+ * User-facing provider choices for the "Models and providers" sheet. Each preset maps onto a [ProviderRoute].
  *
  * Hosted services ([PresetGroup.HOSTED]) use the service's own official https address, which the user can't edit, so a
  * key typed into the OpenAI card can only ever go to OpenAI. Any other service is reached through [CUSTOM] (OpenAI
@@ -513,7 +513,7 @@ object ProviderPresets {
             }
         }
         if (requireModel && modelId.isBlank()) {
-            return if (preset == ProviderPreset.GOOGLE_GEMINI) "Enter a model name." else "Pick a model (tap Load models) or type its name."
+            return if (preset == ProviderPreset.GOOGLE_GEMINI) "Enter a model name." else "Pick a model (tap Find models) or type its name."
         }
         return null
     }

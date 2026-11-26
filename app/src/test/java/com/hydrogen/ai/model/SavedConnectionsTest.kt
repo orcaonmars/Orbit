@@ -84,12 +84,12 @@ class SavedConnectionsTest {
     @Test
     fun server_labels_say_where_the_model_runs() {
         val g = SavedConnections.from(google, true, 1L)!!
-        assertEquals("Google AI Studio · web search", SavedConnections.serverLabel(g))
+        assertEquals("Google AI Studio, web search", SavedConnections.serverLabel(g))
         assertEquals("Google AI Studio", SavedConnections.serverLabel(g.copy(webSearchEnabled = false)))
         val lm = SavedConnections.from(relay("http://10.0.2.2:1234", "q"), false, 1L)!!
-        assertEquals("LM Studio · 10.0.2.2", SavedConnections.serverLabel(lm))
+        assertEquals("LM Studio, 10.0.2.2", SavedConnections.serverLabel(lm))
         val ollama = SavedConnections.from(relay("http://10.0.2.2:11434", "q"), false, 1L)!!
-        assertEquals("Ollama · 10.0.2.2", SavedConnections.serverLabel(ollama))
+        assertEquals("Ollama, 10.0.2.2", SavedConnections.serverLabel(ollama))
         val custom = SavedConnections.from(relay("https://api.example.com:8443/v1", "q"), false, 1L)!!
         assertEquals("api.example.com:8443", SavedConnections.serverLabel(custom))
     }

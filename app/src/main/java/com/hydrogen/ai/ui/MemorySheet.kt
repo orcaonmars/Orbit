@@ -141,7 +141,7 @@ fun MemorySheet(
                 },
                 trailingIcon = {
                     IconButton(onClick = submitNew, enabled = newText.isNotBlank()) {
-                        Icon(Icons.Filled.AddCircle, contentDescription = "Add note")
+                        Icon(com.hydrogen.ai.ui.OrbitIcons.Add, contentDescription = "Add note")
                     }
                 },
                 isError = addError != null,

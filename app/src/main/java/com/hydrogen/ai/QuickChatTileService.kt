@@ -40,6 +40,7 @@ class QuickChatTileService : TileService() {
             )
         } else {
             @Suppress("DEPRECATION")
+            @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated") // gated to API < 34 above
             startActivityAndCollapse(intent)
         }
     }

@@ -35,6 +35,7 @@ import com.hydrogen.ai.model.QuickAction
 import com.hydrogen.ai.model.Persona
 import com.hydrogen.ai.model.Personas
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -60,6 +61,8 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.GraphicEq
@@ -75,6 +78,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.sp
 import com.hydrogen.ai.model.Dictation
 import com.hydrogen.ai.model.StartGreeting
+import com.hydrogen.ai.model.StartIdea
+import com.hydrogen.ai.model.StartIdeas
 import com.hydrogen.ai.model.Personal
 import com.hydrogen.ai.ui.theme.OrbitTheme
 import com.hydrogen.ai.ui.voice.DictationToolbar
@@ -849,6 +854,22 @@ fun ChatScreen(
             onOpenSettings = {
                 if (!twoPane) scope.launch { drawerState.close() }
                 openSettingsHome()
+            },
+            profileMenu = run {
+                val closeThen: (() -> Unit) -> () -> Unit = { open ->
+                    { if (!twoPane) scope.launch { drawerState.close() }; open() }
+                }
+                listOfNotNull(
+                    DrawerMenuAction("Personalization", OrbitIcons.Edit, closeThen { showPersonal = true }),
+                    DrawerMenuAction("Memory", OrbitIcons.StarOutline, closeThen { showMemory = true }),
+                    appearanceController?.let {
+                        DrawerMenuAction("Appearance", OrbitIcons.Contrast, closeThen { showAppearance = true })
+                    },
+                    DrawerMenuAction("Models and providers", OrbitIcons.Cloud,
+                        closeThen { settingsPreset = null; showSettings = true }),
+                    DrawerMenuAction("PC Companion", OrbitIcons.Computer, closeThen { showCompanionSheet = true }),
+                    DrawerMenuAction("Settings", OrbitIcons.Settings, closeThen { openSettingsHome() })
+                )
             }
         )
     }
@@ -968,10 +989,9 @@ fun ChatScreen(
             dismissButton = { TextButton(onClick = { showMicNeeded = false }) { Text("Not now") } }
         )
     }
-    // Child sheets replace the root while open. Closing a child restores the search and root.
-    val settingsChildOpen = showSettings || showDiagnostics || showCompanionSheet || showMemory ||
-        showPersonal || showPrivacy || showAppearance || showAbout || showLicenses || showWhatsNewAgain
-    if (settingsSession && !settingsChildOpen && !state.whatsNew) {
+    // Settings stays drawn under its child sheets (they are composed after it, so they stack on top), so a sheet
+    // opened from Settings sits over Settings rather than over the chat, and closing it lands back there.
+    if (settingsSession && !state.whatsNew) {
         StudioSettingsScreen(
             query = settingsQuery, onQueryChange = { settingsQuery = it },
             onPersonal = { showPersonal = true },
@@ -1326,7 +1346,8 @@ private fun ConversationDrawerContent(
     onMoveToProject: (String, String?) -> Unit,
     onEditProject: (String) -> Unit,
     onNewProject: (moveChatId: String?) -> Unit,
-    onOpenSettings: () -> Unit
+    onOpenSettings: () -> Unit,
+    profileMenu: List<DrawerMenuAction> = emptyList()
 ) {
     // Saveable: rotating, unfolding or a light/dark switch recreates the screen and would otherwise clear the search.
     var query by rememberSaveable { mutableStateOf("") }
@@ -1440,7 +1461,7 @@ private fun ConversationDrawerContent(
                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                     if (current != null) {
                         DrawerNavRow(
-                            icon = Icons.Outlined.FolderOff,
+                            icon = OrbitIcons.FolderOff,
                             label = "No project",
                             onClick = {
                                 onMoveToProject(target.id, null)
@@ -1450,7 +1471,7 @@ private fun ConversationDrawerContent(
                     }
                     projects.forEach { project ->
                         DrawerNavRow(
-                            icon = Icons.Outlined.Folder,
+                            icon = OrbitIcons.Folder,
                             label = project.name,
                             selected = project.id == current,
                             onClick = {
@@ -1460,7 +1481,7 @@ private fun ConversationDrawerContent(
                         )
                     }
                     DrawerNavRow(
-                        icon = Icons.Outlined.CreateNewFolder,
+                        icon = OrbitIcons.FolderAdd,
                         label = "New project",
                         onClick = {
                             moveTarget = null
@@ -1519,10 +1540,11 @@ private fun ConversationDrawerContent(
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(onClick = onNewChat) {
-                        Icon(Icons.Outlined.EditNote, contentDescription = "New chat")
+                        Icon(OrbitIcons.NewChat, contentDescription = "New chat")
                     }
                 }
-                DrawerActionButton(icon = OrbitIcons.Add, label = "New chat", onClick = onNewChat)
+                // The pencil in the header is the one New chat control here, as in other chat apps; a second
+                // full-width "New chat" button under it only pushed the chat list down.
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
@@ -1586,7 +1608,7 @@ private fun ConversationDrawerContent(
                 items(shownProjects, key = { "project-${it.id}" }, contentType = { "nav" }) { project ->
                     val count = projectChatCounts[project.id] ?: 0
                     DrawerNavRow(
-                        icon = Icons.Outlined.Folder,
+                        icon = OrbitIcons.Folder,
                         label = project.name,
                         trailing = if (count > 0) count.toString() else null,
                         onClick = { onViewChange(DrawerView.project(project.id)) },
@@ -1605,7 +1627,7 @@ private fun ConversationDrawerContent(
                 }
                 item(key = "project-new", contentType = "nav") {
                     DrawerNavRow(
-                        icon = Icons.Outlined.CreateNewFolder,
+                        icon = OrbitIcons.FolderAdd,
                         label = "New project",
                         onClick = { onNewProject(null) },
                         modifier = Modifier.animateItem()
@@ -1660,7 +1682,7 @@ private fun ConversationDrawerContent(
             if (showProjects && archivedCount > 0) {
                 item(key = "archived-link", contentType = "nav") {
                     DrawerNavRow(
-                        icon = Icons.Outlined.Archive,
+                        icon = OrbitIcons.Archive,
                         label = "Archived chats",
                         trailing = archivedCount.toString(),
                         onClick = { onViewChange(DrawerView.ARCHIVED) },
@@ -1673,47 +1695,79 @@ private fun ConversationDrawerContent(
         }
         if (inMain) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            DrawerSettingsFooter(state.personal.name, onOpenSettings)
+            DrawerSettingsFooter(state.personal.name, onOpenSettings, profileMenu)
         }
     }
 }
 
-/** The footer is a local settings entry, not a simulated signed-in account. */
+/** One entry in the sidebar's profile menu. */
+internal data class DrawerMenuAction(val label: String, val icon: ImageVector, val onClick: () -> Unit)
+
+/** Up to two initials from the name in Settings, Personal. Blank when no name is set. */
+internal fun profileInitials(name: String): String =
+    name.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.take(2)
+        .joinToString("") { it.first().uppercaseChar().toString() }
+
+/**
+ * The footer is a local profile, not a simulated signed-in account. Tapping it opens a short menu of the places people
+ * look for from here (personalization, memory, appearance, models) with Settings last; with no menu it opens Settings.
+ */
 @Composable
-private fun DrawerSettingsFooter(name: String, onClick: () -> Unit) {
+private fun DrawerSettingsFooter(name: String, onClick: () -> Unit, menu: List<DrawerMenuAction> = emptyList()) {
     val colors = OrbitTheme.colors
     val space = OrbitTheme.space
     val title = name.trim().ifBlank { stringResource(com.hydrogen.ai.R.string.studio_settings) }
-    Surface(
-        onClick = onClick,
-        color = colors.bg,
-        shape = OrbitTheme.shapes.l,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = space.s, vertical = space.s)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = space.m, vertical = space.m),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(space.m)
+    val initials = profileInitials(name)
+    var menuOpen by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxWidth().padding(horizontal = space.s, vertical = space.s)) {
+        Surface(
+            onClick = { if (menu.isEmpty()) onClick() else menuOpen = true },
+            color = colors.bg,
+            shape = OrbitTheme.shapes.l,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Box(
-                modifier = Modifier.size(40.dp).clip(CircleShape).background(colors.surface2),
-                contentAlignment = Alignment.Center
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = space.m, vertical = space.m),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(space.m)
             ) {
-                Icon(OrbitIcons.Tune, contentDescription = null, tint = colors.text, modifier = Modifier.size(20.dp))
-            }
-            Column(Modifier.weight(1f)) {
-                Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = colors.text)
-                if (name.isNotBlank()) {
-                    Text(stringResource(com.hydrogen.ai.R.string.studio_settings), color = colors.muted,
-                        style = MaterialTheme.typography.bodySmall)
-                } else {
-                    Text(stringResource(com.hydrogen.ai.R.string.studio_settings_local_profile), color = colors.muted,
-                        style = MaterialTheme.typography.bodySmall)
+                Box(
+                    modifier = Modifier.size(36.dp).clip(CircleShape).background(colors.accent.copy(alpha = 0.18f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (initials.isNotEmpty()) {
+                        Text(initials, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
+                            color = colors.accent)
+                    } else {
+                        Icon(OrbitIcons.Person, contentDescription = null, tint = colors.accent, modifier = Modifier.size(18.dp))
+                    }
                 }
+                Column(Modifier.weight(1f)) {
+                    Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = colors.text)
+                    Text(
+                        stringResource(
+                            if (name.isNotBlank()) com.hydrogen.ai.R.string.studio_settings
+                            else com.hydrogen.ai.R.string.studio_settings_local_profile
+                        ),
+                        color = colors.muted,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Icon(
+                    if (menu.isEmpty()) OrbitIcons.ChevronRight else OrbitIcons.MoreHorizontal,
+                    contentDescription = null, tint = colors.muted, modifier = Modifier.size(18.dp)
+                )
             }
-            Icon(OrbitIcons.ChevronDown, contentDescription = null, tint = colors.muted,
-                modifier = Modifier.size(18.dp).rotate(-90f))
+        }
+        OrbitMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            menu.forEach { action ->
+                OrbitMenuItem(
+                    text = { Text(action.label) },
+                    leadingIcon = { Icon(action.icon, contentDescription = null) },
+                    onClick = { menuOpen = false; action.onClick() }
+                )
+            }
         }
     }
 }
@@ -1728,7 +1782,7 @@ private fun DrawerSubHeader(title: String, onBack: () -> Unit, actions: @Composa
         verticalAlignment = Alignment.CenterVertically
     ) {
         IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to all chats")
+            Icon(OrbitIcons.ArrowBack, contentDescription = "Back to all chats")
         }
         Text(
             text = title,
@@ -1803,7 +1857,7 @@ private fun ProjectSummaryCard(project: Project, onClick: () -> Unit) {
             )
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
                 Icon(
-                    Icons.Outlined.Description,
+                    OrbitIcons.File,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp)
@@ -1951,16 +2005,7 @@ private fun DrawerConversationRow(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(start = 12.dp)
         ) {
-            if (selected) {
-                // A short accent bar marks the open chat.
-                Box(
-                    modifier = Modifier
-                        .padding(end = 8.dp)
-                        .size(width = 3.dp, height = 16.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(OrbitTheme.colors.accent)
-                )
-            }
+            // The quiet fill alone marks the open chat, so its title lines up with every other row.
             val highlight = SpanStyle(
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.SemiBold,
@@ -2009,7 +2054,7 @@ private fun DrawerConversationRow(
             }
             if (conversation.pinned) {
                 Icon(
-                    Icons.Filled.PushPin,
+                    OrbitIcons.Pin,
                     contentDescription = "Pinned",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
@@ -2020,7 +2065,7 @@ private fun DrawerConversationRow(
             Box {
                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(40.dp)) {
                     Icon(
-                        Icons.Default.MoreVert,
+                        OrbitIcons.MoreHorizontal,
                         contentDescription = "Chat options",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
@@ -2032,7 +2077,7 @@ private fun DrawerConversationRow(
                             text = { Text(if (conversation.pinned) "Unpin" else "Pin") },
                             leadingIcon = {
                                 Icon(
-                                    if (conversation.pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                                    OrbitIcons.Pin,
                                     contentDescription = null
                                 )
                             },
@@ -2053,7 +2098,7 @@ private fun DrawerConversationRow(
                     if (!conversation.archived) {
                         OrbitMenuItem(
                             text = { Text("Move to project") },
-                            leadingIcon = { Icon(Icons.Outlined.Folder, contentDescription = null) },
+                            leadingIcon = { Icon(OrbitIcons.Folder, contentDescription = null) },
                             onClick = {
                                 menuOpen = false
                                 onMove()
@@ -2064,7 +2109,7 @@ private fun DrawerConversationRow(
                         text = { Text(if (conversation.archived) "Unarchive" else "Archive") },
                         leadingIcon = {
                             Icon(
-                                if (conversation.archived) Icons.Outlined.Unarchive else Icons.Outlined.Archive,
+                                if (conversation.archived) OrbitIcons.Unarchive else OrbitIcons.Archive,
                                 contentDescription = null
                             )
                         },
@@ -2278,13 +2323,13 @@ private fun ChatScaffold(
                         TemporaryChatToggle(on = state.isTemporaryChat, onChange = onTemporaryChat)
                     } else {
                         IconButton(onClick = onNewChat) {
-                            Icon(Icons.Outlined.EditNote, contentDescription = "New chat")
+                            Icon(OrbitIcons.NewChat, contentDescription = "New chat")
                         }
                     }
                     var menuOpen by remember { mutableStateOf(false) }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More options")
+                            Icon(OrbitIcons.MoreHorizontal, contentDescription = "More options")
                         }
                         val shareContext = LocalContext.current
                         val conversation = state.activeConversation
@@ -2314,7 +2359,7 @@ private fun ChatScaffold(
                                             else "Chat instructions"
                                         )
                                     },
-                                    leadingIcon = { Icon(OrbitIcons.Tune, contentDescription = null) },
+                                    leadingIcon = { Icon(OrbitIcons.Edit, contentDescription = null) },
                                     onClick = {
                                         menuOpen = false
                                         editingInstructionsFor = conversation
@@ -2324,12 +2369,12 @@ private fun ChatScaffold(
                             if (shareable != null) {
                                 OrbitMenuItem(
                                     text = { Text("Find in conversation") },
-                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                    leadingIcon = { Icon(OrbitIcons.Search, contentDescription = null) },
                                     onClick = { menuOpen = false; findOpen = true }
                                 )
                                 OrbitMenuItem(
                                     text = { Text("Share chat") },
-                                    leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                                    leadingIcon = { Icon(OrbitIcons.Share, contentDescription = null) },
                                     onClick = {
                                         menuOpen = false
                                         val send = Intent(Intent.ACTION_SEND).apply {
@@ -2492,10 +2537,10 @@ private fun ChatBodyContent(
                                 findPosition = 0
                             },
                             singleLine = true, label = { Text("Find in chat") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            leadingIcon = { Icon(OrbitIcons.Search, contentDescription = null) },
                             shape = RoundedCornerShape(16.dp), modifier = Modifier.weight(1f).focusRequester(focus)
                         )
-                        IconButton(onClick = onCloseFind) { Icon(Icons.Default.Close, contentDescription = "Close search") }
+                        IconButton(onClick = onCloseFind) { Icon(OrbitIcons.Close, contentDescription = "Close search") }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(when {
@@ -2504,7 +2549,7 @@ private fun ChatBodyContent(
                             else -> "Message "+(findPosition.coerceIn(0, findMatches.lastIndex)+1)+" of "+findMatches.size
                         }, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
                         IconButton(onClick = { findPosition = com.hydrogen.ai.model.ChatFind.step(findPosition, -1, findMatches.size) },
-                            enabled = findMatches.isNotEmpty()) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous match") }
+                            enabled = findMatches.isNotEmpty()) { Icon(OrbitIcons.ChevronUp, contentDescription = "Previous match") }
                         IconButton(onClick = { findPosition = com.hydrogen.ai.model.ChatFind.step(findPosition, 1, findMatches.size) },
                             enabled = findMatches.isNotEmpty()) { Icon(OrbitIcons.ChevronDown, contentDescription = "Next match") }
                     }
@@ -2620,7 +2665,7 @@ private fun ChatBodyContent(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                itemsIndexed(shownMessages, key = { _, it -> it.id }) { index, message ->
+                itemsIndexed(shownMessages, key = { _, it -> it.id }, contentType = { _, it -> it.role }) { index, message ->
                     val isLast = index == messages.lastIndex
                     // Parsed from the stored reply (the shown copy has the block removed), once it has finished.
                     val stored = messages[index]
@@ -2634,7 +2679,9 @@ private fun ChatBodyContent(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .animateItem(),
+                            // Slide only, no fade: the list jumps to its end on every streamed chunk, and a fade
+                            // restarted each time left the whole conversation dimmed until the reply finished.
+                            .animateItem(fadeInSpec = null, fadeOutSpec = null),
                         contentAlignment = Alignment.TopCenter
                     ) {
                     MessageItem(
@@ -2779,10 +2826,10 @@ private data class OnboardingChoice(
 
 private val ONBOARDING_CHOICES = listOf(
     OnboardingChoice(ProviderPreset.LM_STUDIO, "On my PC with LM Studio", "Free and private. No key needed.", OrbitIcons.Computer),
-    OnboardingChoice(ProviderPreset.OLLAMA, "On my PC with Ollama", "Free and private. No key needed.", Icons.Outlined.Terminal),
+    OnboardingChoice(ProviderPreset.OLLAMA, "On my PC with Ollama", "Free and private. No key needed.", OrbitIcons.Terminal),
     OnboardingChoice(
         ProviderPreset.GOOGLE_GEMINI, "Google Gemini", "Gemini models with your own AI Studio API key.",
-        Icons.Outlined.AutoAwesome
+        OrbitIcons.Sparkle
     ),
     OnboardingChoice(ProviderPreset.CUSTOM, "Another service", "Any OpenAI-compatible URL and key.", OrbitIcons.Cloud)
 )
@@ -2927,14 +2974,6 @@ private fun EmptyChatPlaceholder(
             }
         )
     }
-    val workSummary = when {
-        workMode == VerificationState.PASS ->
-            "PC paired (${companion.session?.deviceName ?: "PC"}), Work mode on."
-        companion.isPaired && workMode == VerificationState.FAIL ->
-            "PC paired, Work mode off."
-        companion.isPaired -> "PC paired."
-        else -> ""
-    }
     val orbit = OrbitTheme.colors
     val now = rememberLocalMinute()
     Column(
@@ -2948,29 +2987,35 @@ private fun EmptyChatPlaceholder(
         // When the content is taller than the screen both spacers shrink to nothing and the page scrolls.
         Spacer(Modifier.weight(2f))
         if (!configured) { HorizonArc(time = now); Spacer(Modifier.height(18.dp)) }
+        else { OrbitHero(); Spacer(Modifier.height(18.dp)) }
+        // One of the short questions under the greeting, picked once per new chat.
+        val startLine = rememberSaveable { StartGreeting.SUBLINES.random() }
         Text(
             text = when {
                 !configured -> "Welcome to Orbit"
                 temporary -> TemporaryChatCopy.TITLE
                 project != null -> project.name
-                else -> if (firstName.isNullOrBlank()) "What can I help with?" else StartGreeting.greeting(now.hour, firstName)
+                else -> StartGreeting.greeting(now.hour, firstName)
             },
-            style = MaterialTheme.typography.headlineMedium,
+            style = MaterialTheme.typography.headlineMedium.copy(
+                fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.Medium, letterSpacing = (-0.9).sp
+            ),
             color = orbit.text,
             textAlign = TextAlign.Center,
             modifier = Modifier.semantics { heading() }
         )
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(8.dp))
         Crossfade(targetState = if (configured) persona else null, label = "start-subline") { shown ->
-            Text(
-                text = when {
+            val subline = when {
                     !configured -> "Where should your AI run? Pick one to get started."
                     temporary -> TemporaryChatCopy.START_LINE
                     shown != null -> shown.greeting
                     customInstructions -> "Your own chat instructions are on."
                     project != null -> ProjectCopy.startLine(project)
-                    else -> "Ask anything, or start with an idea below."
-                },
+                    else -> startLine
+                }
+            if (subline.isNotEmpty()) Text(
+                text = subline,
                 style = MaterialTheme.typography.bodyLarge.copy(fontSize = 17.sp),
                 color = orbit.muted,
                 textAlign = TextAlign.Center,
@@ -2980,10 +3025,16 @@ private fun EmptyChatPlaceholder(
         if (configured) {
             // A persona never overwrites instructions the user wrote; those are edited in Chat instructions.
             if (onPickPersona != null && !customInstructions) {
-                Spacer(Modifier.height(12.dp))
-                TextButton(onClick = { showAssistants = !showAssistants }) {
-                    Text(persona?.let { "Assistant: "+it.name } ?: "Choose an assistant")
-                    Icon(if (showAssistants) Icons.Filled.KeyboardArrowUp else OrbitIcons.ChevronDown,
+                Spacer(Modifier.height(20.dp))
+                TextButton(
+                    onClick = { showAssistants = !showAssistants },
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = orbit.faint)
+                ) {
+                    Text(
+                        persona?.let { "Assistant: "+it.name } ?: "Choose an assistant",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    Icon(if (showAssistants) OrbitIcons.ChevronUp else OrbitIcons.ChevronDown,
                         contentDescription = null, modifier = Modifier.size(16.dp))
                 }
                 if (showAssistants) PersonaPicker(
@@ -2997,7 +3048,7 @@ private fun EmptyChatPlaceholder(
                 if (showAssistants && persona != null) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         TextButton(onClick = { sharePersona(context, persona) }) {
-                            Icon(Icons.Outlined.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(OrbitIcons.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("Share ${persona.name}", style = MaterialTheme.typography.labelMedium)
                         }
@@ -3017,6 +3068,40 @@ private fun EmptyChatPlaceholder(
             }
         }
         Spacer(Modifier.height(24.dp))
+        if (configured && !temporary && project == null && !showAssistants) {
+            // Three quiet starting points, a fresh set for each new chat. A tap fills the composer; nothing is sent.
+            val ideaSeed = rememberSaveable { kotlin.random.Random.nextLong() }
+            val ideas = remember(ideaSeed) { StartIdeas.pick(ideaSeed) }
+            val still = rememberReducedMotion()
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .widthIn(max = 420.dp)
+                    .fillMaxWidth()
+            ) {
+                ideas.forEachIndexed { i, idea ->
+                    val shown = remember(idea.id) { Animatable(if (still) 1f else 0f) }
+                    LaunchedEffect(idea.id) {
+                        if (!still) {
+                            kotlinx.coroutines.delay(140L + 70L * i)
+                            shown.animateTo(1f, tween(520, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)))
+                        }
+                    }
+                    StartCard(
+                        icon = startIdeaIcon(idea.kind),
+                        title = idea.title,
+                        detail = idea.detail,
+                        onClick = { onUsePrompt(idea.draft) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer {
+                                alpha = shown.value
+                                translationY = (1f - shown.value) * 14.dp.toPx()
+                            }
+                    )
+                }
+            }
+        }
         if (!configured) {
             Column(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -3042,36 +3127,33 @@ private fun EmptyChatPlaceholder(
                 textAlign = TextAlign.Center
             )
             TextButton(onClick = onOpenSettings) { Text("All providers and settings") }
-        } else if (!temporary && project == null) {
-            FlowRow(
-                modifier = Modifier.widthIn(max = 420.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                listOf("Help me write" to "Help me write ",
-                    "Explain a concept" to "Explain ",
-                    "Make a plan" to "Help me make a plan for ",
-                    "Write code" to "Help me write code for ").forEach { (label, prompt) ->
-                    SuggestionChip(onClick = { onUsePrompt(prompt) }, label = { Text(label) })
-                }
-            }
         }
         Spacer(Modifier.weight(3f))
-        Spacer(Modifier.height(28.dp))
-        Text(
-            text = (if (configured) "${ModelDisplayName.friendly(modelId)} · " else "") +
-                "Chats stay on this phone. $workSummary".trim(),
-            style = MaterialTheme.typography.labelSmall,
-            color = orbit.muted,
-            textAlign = TextAlign.Center
-        )
-        TextButton(onClick = onOpenCompanion) {
-            Text(
-                text = if (companion.isPaired) "PC Companion" else "Pair your Windows PC (optional)",
-                style = MaterialTheme.typography.labelMedium
-            )
+        // The model already shows in the header, so the foot of the page only offers pairing until a PC is paired.
+        if (!companion.isPaired && !temporary) {
+            Spacer(Modifier.height(20.dp))
+            TextButton(onClick = onOpenCompanion) {
+                Icon(OrbitIcons.Computer, contentDescription = null, tint = orbit.muted, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "Pair your Windows PC",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = orbit.muted
+                )
+            }
         }
     }
+}
+
+private fun startIdeaIcon(kind: StartIdea.Kind): ImageVector = when (kind) {
+    StartIdea.Kind.Plan -> OrbitIcons.Pin
+    StartIdea.Kind.Summarize -> OrbitIcons.File
+    StartIdea.Kind.Explain -> OrbitIcons.Info
+    StartIdea.Kind.Write -> OrbitIcons.Edit
+    StartIdea.Kind.Reply -> OrbitIcons.NewChat
+    StartIdea.Kind.Ideas -> OrbitIcons.Sparkle
+    StartIdea.Kind.Learn -> OrbitIcons.Bookmark
+    StartIdea.Kind.Decide -> OrbitIcons.Compare
 }
 
 /** Opens the share sheet with a one-line persona code anyone can paste into Hydrogen's Import. */
@@ -3153,7 +3235,7 @@ private fun ImportPersonaDialog(onDismiss: () -> Unit, onImport: (SharedPersona)
     var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Outlined.Face, contentDescription = null) },
+        icon = { Icon(OrbitIcons.Person, contentDescription = null) },
         title = { Text("Import a persona") },
         text = {
             Column {
@@ -3272,7 +3354,7 @@ private fun MessageItem(
                     OrbitMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         OrbitMenuItem(
                             text = { Text("Copy") },
-                            leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
+                            leadingIcon = { Icon(OrbitIcons.Copy, contentDescription = null) },
                             onClick = {
                                 menuOpen = false
                                 val copied = copyOrbitText(context, "Orbit message", message.content)
@@ -3337,7 +3419,11 @@ private fun MessageItem(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ReplyHeader(
                     // Compared answers pass their own label; everything else names the model that wrote it.
-                    name = modelLabel ?: ModelDisplayName.friendly(message.modelId),
+                    // The service that answered joins the model on the one header line ("Opus 5.5, Clean APIs").
+                    name = modelLabel ?: listOfNotNull(
+                        ModelDisplayName.friendly(message.modelId),
+                        message.requestProfile?.providerLabel?.takeIf { it.isNotBlank() }
+                    ).joinToString(", "),
                     working = working,
                     // While words are arriving the spinning mark is the only sign of life, so it speaks for itself.
                     // Before the first word, the "Thinking" line below says it instead.
@@ -3348,9 +3434,10 @@ private fun MessageItem(
                 // newest reply is already full on a phone.
                 VersionSwitcher(message, versionsEnabled, onShowVersion)
             }
-            message.requestProfile?.let { profile ->
-                Text(profile.detail(), style = MaterialTheme.typography.labelSmall,
-                    color = OrbitTheme.colors.muted)
+            message.requestProfile?.requestNote()?.let { note ->
+                // Lines up with the model name, past the 22 dp mark and its 8 dp gap.
+                Text(note, style = MaterialTheme.typography.labelSmall,
+                    color = OrbitTheme.colors.faint, modifier = Modifier.padding(start = 30.dp))
             }
             MessageAttachments(message)
             MessageStatusContent(message, isSending, onRetry, showBody = true, onOpenSettings = onOpenSettings)
@@ -3416,14 +3503,14 @@ private fun VersionSwitcher(message: ChatMessage, enabled: Boolean, onShowVersio
         }
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Arrow(position - 1, Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous version")
+        Arrow(position - 1, OrbitIcons.ChevronLeft, "Previous version")
         Text(
             text = "${position + 1} / $count",
             fontSize = 12.sp,
             color = orbit.faint,
             modifier = Modifier.semantics { contentDescription = "Version ${position + 1} of $count" }
         )
-        Arrow(position + 1, Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next version")
+        Arrow(position + 1, OrbitIcons.ChevronRight, "Next version")
     }
 }
 
@@ -3518,7 +3605,7 @@ private fun MessageAttachments(message: ChatMessage) {
                         )
                         Text(
                             text = formatBytes(attachment.sizeBytes) +
-                                if (attachment.omittedFromRemote) " · Kept on device" else "",
+                                if (attachment.omittedFromRemote) ", kept on device" else "",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -3613,7 +3700,7 @@ private fun MessageStatusContent(
                     val detail = listOfNotNull(
                         err?.httpStatus?.let { "HTTP $it" },
                         err?.technicalDetail?.takeIf { it.isNotBlank() }
-                    ).joinToString(" · ")
+                    ).joinToString(", ")
                     var showDetail by remember(message.id) { mutableStateOf(false) }
                     // Step-by-step help for this kind of failure, folded away with the raw detail.
                     val steps = remember(err) { err?.let { com.hydrogen.ai.model.ErrorExplainer.steps(it) }.orEmpty() }
@@ -3645,20 +3732,22 @@ private fun MessageStatusContent(
                             err.sourceLayer == "local_model"
                         )
                     val cardContext = LocalContext.current
+                    // Icon and label share one colour so each action reads as a single control.
+                    val errorActionColors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = onError)
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalArrangement = Arrangement.spacedBy(0.dp)
                     ) {
                         if (needsSetup) {
-                            TextButton(onClick = onOpenSettings) {
-                                Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                            TextButton(onClick = onOpenSettings, colors = errorActionColors) {
+                                Icon(OrbitIcons.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
                                 Text("Set up", color = onError)
                             }
                         }
                         if (!message.hasSideEffectsInProgress) {
-                            TextButton(onClick = onRetry, enabled = !isSending) {
-                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            TextButton(onClick = onRetry, enabled = !isSending, colors = errorActionColors) {
+                                Icon(OrbitIcons.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
                                 Text("Retry", color = onError)
                             }
@@ -3666,11 +3755,14 @@ private fun MessageStatusContent(
                         if (detail.isNotEmpty() || steps.isNotEmpty()) {
                             TextButton(
                                 onClick = { showDetail = !showDetail },
+                                colors = errorActionColors,
                                 modifier = Modifier.semantics {
                                     stateDescription = if (showDetail) "Shown" else "Hidden"
                                 }
                             ) {
-                                Text(if (showDetail) "Hide help" else "How to fix", color = onError.copy(alpha = 0.85f))
+                                Icon(if (showDetail) OrbitIcons.ChevronUp else OrbitIcons.ChevronDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(if (showDetail) "Hide help" else "How to fix", color = onError)
                             }
                         }
                         if (showDetail && err != null) {
@@ -3713,7 +3805,7 @@ private fun MessageStatusContent(
                             else -> "Reply reached its output limit"
                         })
                     }
-                }.joinToString(" · ")
+                }.joinToString(", ")
                 Text(text = metaNotes, style = MaterialTheme.typography.labelSmall, color = muted)
             }
         }
@@ -3733,7 +3825,17 @@ private fun MessageActions(
     onBranch: (() -> Unit)? = null,
     shareText: String? = null
 ) {
-    if (message.status == MessageStatus.DISPATCHED || message.status == MessageStatus.STREAMING) return
+    // A reply that finishes on screen fades its row in; one that was already done shows it at once.
+    val finishedHere = remember(message.id) { booleanArrayOf(false) }
+    if (message.status == MessageStatus.DISPATCHED || message.status == MessageStatus.STREAMING) {
+        // Hold the row's height while the reply streams, so the list does not jump up when it finishes.
+        if (message.role == MessageRole.ASSISTANT) Spacer(Modifier.height(48.dp))
+        finishedHere[0] = true
+        return
+    }
+    val still = rememberReducedMotion()
+    val reveal = remember(message.id) { Animatable(if (finishedHere[0] && !still) 0f else 1f) }
+    LaunchedEffect(message.id) { reveal.animateTo(1f, tween(240)) }
     val copyText = ConversationMarkdownExporter.messageText(message)
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
@@ -3787,18 +3889,18 @@ private fun MessageActions(
     }
 
     fun icon(action: ReplyAction): ImageVector = when (action) {
-        ReplyAction.COPY -> Icons.Outlined.ContentCopy
-        ReplyAction.READ -> if (isSpeaking) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp
-        ReplyAction.RETRY -> Icons.Default.Refresh
-        ReplyAction.SHARE -> Icons.Outlined.Share
-        ReplyAction.COMPARE -> Icons.Outlined.Compare
-        ReplyAction.BRANCH -> Icons.AutoMirrored.Outlined.AltRoute
+        ReplyAction.COPY -> OrbitIcons.Copy
+        ReplyAction.READ -> if (isSpeaking) OrbitIcons.Stop else OrbitIcons.Speaker
+        ReplyAction.RETRY -> OrbitIcons.Refresh
+        ReplyAction.SHARE -> OrbitIcons.Share
+        ReplyAction.COMPARE -> OrbitIcons.Compare
+        ReplyAction.BRANCH -> OrbitIcons.Branch
     }
 
     var menuOpen by remember(message.id) { mutableStateOf(false) }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val plan = ReplyActionLayout.plan(available, maxWidth.value)
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.graphicsLayer { alpha = reveal.value }) {
             for (action in plan.inline) {
                 val speaking = action == ReplyAction.READ && isSpeaking
                 IconButton(
@@ -3824,7 +3926,7 @@ private fun MessageActions(
                 Box {
                     IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
                         Icon(
-                            Icons.Default.MoreHoriz,
+                            OrbitIcons.MoreHorizontal,
                             contentDescription = stringResource(R.string.reply_more_actions),
                             tint = tint,
                             modifier = Modifier.size(20.dp)
@@ -3855,7 +3957,8 @@ private fun MessageBody(message: ChatMessage) {
     if (message.role == MessageRole.USER) {
         Text(text = message.content, style = MaterialTheme.typography.bodyLarge)
     } else if (!PdfMarkdown.hasDocument(message.content)) {
-        MarkdownMessage(content = message.content)
+        val streaming = message.status == MessageStatus.DISPATCHED || message.status == MessageStatus.STREAMING
+        MarkdownMessage(content = if (streaming) com.hydrogen.ai.model.StreamingMarkdown.settled(message.content) else message.content)
     } else {
         val streaming = message.status == MessageStatus.DISPATCHED || message.status == MessageStatus.STREAMING
         val parts = remember(message.content) { PdfMarkdown.splitReply(message.content) }
@@ -3974,7 +4077,7 @@ private fun ComposerBar(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     contentPadding = PaddingValues(horizontal = 2.dp)
                 ) {
-                    items(stagedAttachments, key = { it.id }) { item ->
+                    items(stagedAttachments, key = { it.id }, contentType = { "attachment" }) { item ->
                         StagedPhoto(
                             item = item,
                             enabled = !isSending,
@@ -4140,12 +4243,8 @@ private fun ComposerBar(
             val configuration = LocalConfiguration.current
             val compactControls = configuration.screenWidthDp >= 360 && configuration.fontScale <= LARGE_FONT_SCALE
             val modelControls: @Composable RowScope.() -> Unit = {
-                    TextButton(onClick = onSwitchModel, modifier = Modifier.weight(1f).semantics { contentDescription = "Switch model: $modelLabel" },
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)) {
-                        Text(modelLabel.ifBlank { "Select model" }, maxLines = 1, overflow = TextOverflow.Ellipsis, color = orbit.muted,
-                            style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f, fill = false))
-                        Icon(OrbitIcons.ChevronDown, contentDescription = null, tint = orbit.muted, modifier = Modifier.size(16.dp))
-                    }
+                    // The model lives in the header pill only; one place to read it, one place to change it.
+                    Spacer(Modifier.weight(1f))
                 if (reasoningChoices.size > 1 && !isSending) {
                     val effectiveMode = reasoningMode.takeIf { it in reasoningChoices } ?: com.hydrogen.ai.model.ReasoningMode.AUTO
                     Box {
@@ -4226,24 +4325,24 @@ private fun ComposerBar(
                     OrbitMenu(expanded = showAttachMenu, onDismissRequest = { showAttachMenu = false }) {
                         OrbitMenuItem(
                             text = { Text("Photo") },
-                            leadingIcon = { Icon(Icons.Outlined.Image, contentDescription = null) },
+                            leadingIcon = { Icon(OrbitIcons.Image, contentDescription = null) },
                             onClick = { showAttachMenu = false; onPickImages() }
                         )
                         if (onTakePhoto != null) {
                             OrbitMenuItem(
                                 text = { Text("Camera") },
-                                leadingIcon = { Icon(Icons.Outlined.PhotoCamera, contentDescription = null) },
+                                leadingIcon = { Icon(OrbitIcons.Camera, contentDescription = null) },
                                 onClick = { showAttachMenu = false; onTakePhoto() }
                             )
                         }
                         OrbitMenuItem(
                             text = { Text("File (text, code, PDF)") },
-                            leadingIcon = { Icon(Icons.Outlined.Description, contentDescription = null) },
+                            leadingIcon = { Icon(OrbitIcons.File, contentDescription = null) },
                             onClick = { showAttachMenu = false; onPickFile() }
                         )
                         OrbitMenuItem(
                             text = { Text("Saved prompts") },
-                            leadingIcon = { Icon(Icons.Default.BookmarkBorder, contentDescription = null) },
+                            leadingIcon = { Icon(OrbitIcons.Bookmark, contentDescription = null) },
                             onClick = { showAttachMenu = false; showPrompts = true }
                         )
                     }
@@ -4253,7 +4352,11 @@ private fun ComposerBar(
                 } else {
                     Spacer(Modifier.weight(1f))
                 }
-                if (voiceAvailable && !isSending) {
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = voiceAvailable && !isSending,
+                    enter = fadeIn(tween(160)) + scaleIn(tween(160), initialScale = 0.8f),
+                    exit = fadeOut(tween(110)) + scaleOut(tween(110), targetScale = 0.8f)
+                ) {
                     IconButton(onClick = {
                         keyboardController?.hide()
                         onVoiceInput()
@@ -4261,32 +4364,48 @@ private fun ComposerBar(
                         Icon(OrbitIcons.Mic, contentDescription = "Dictate", tint = orbit.muted)
                     }
                 }
-                when {
-                    isSending -> SunButton(
-                        icon = OrbitIcons.ArrowUpward,
-                        contentDescription = "Stop response",
-                        onClick = onCancelSend,
-                        stopping = true
-                    )
+                val actionMode = when {
+                    isSending -> 0
                     onStartVoiceChat != null && VoiceInputPolicy.showMicInsteadOfSend(
                         voiceAvailable, isSending, draftText, stagedAttachments.isNotEmpty()
-                    ) -> SunButton(
-                        icon = Icons.Rounded.GraphicEq,
-                        contentDescription = "Start voice chat",
-                        onClick = {
-                            keyboardController?.hide()
-                            onStartVoiceChat()
-                        }
-                    )
-                    else -> SunButton(
-                        icon = OrbitIcons.ArrowUpward,
-                        contentDescription = if (isEditing) "Send edited message" else "Send message",
-                        enabled = draftText.isNotBlank() || stagedAttachments.isNotEmpty(),
-                        onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onSend()
-                        }
-                    )
+                    ) -> 1
+                    else -> 2
+                }
+                // Send, stop and voice swap with a short scale and fade instead of snapping.
+                androidx.compose.animation.AnimatedContent(
+                    targetState = actionMode,
+                    transitionSpec = {
+                        (fadeIn(tween(160)) + scaleIn(tween(200), initialScale = 0.7f)) togetherWith
+                            (fadeOut(tween(110)) + scaleOut(tween(110), targetScale = 0.7f))
+                    },
+                    contentAlignment = Alignment.Center,
+                    label = "composer-action"
+                ) { mode ->
+                    when (mode) {
+                        0 -> SunButton(
+                            icon = OrbitIcons.ArrowUpward,
+                            contentDescription = "Stop response",
+                            onClick = onCancelSend,
+                            stopping = true
+                        )
+                        1 -> SunButton(
+                            icon = OrbitIcons.Waveform,
+                            contentDescription = "Start voice chat",
+                            onClick = {
+                                keyboardController?.hide()
+                                onStartVoiceChat?.invoke()
+                            }
+                        )
+                        else -> SunButton(
+                            icon = OrbitIcons.ArrowUpward,
+                            contentDescription = if (isEditing) "Send edited message" else "Send message",
+                            enabled = draftText.isNotBlank() || stagedAttachments.isNotEmpty(),
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSend()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -4363,7 +4482,7 @@ private fun PromptLibraryDialog(
                     if (filtered.isNotEmpty()) listState.scrollToItem(0)
                 }
                 LazyColumn(state = listState, modifier = Modifier.heightIn(max = 240.dp)) {
-                    items(filtered, key = { it.id }) { prompt ->
+                    items(filtered, key = { it.id }, contentType = { "prompt" }) { prompt ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -4492,7 +4611,7 @@ private fun AttachmentThumbnail(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Default.Image,
+                imageVector = OrbitIcons.Image,
                 contentDescription = contentDescription,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
@@ -4523,7 +4642,7 @@ private fun formatBytes(bytes: Long): String = when {
     bytes <= 0L -> "unknown size"
     bytes < 1024L -> "$bytes B"
     bytes < 1024L * 1024L -> "${bytes / 1024L} KB"
-    else -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
+    else -> String.format(java.util.Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0))
 }
 
 

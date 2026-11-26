@@ -11,8 +11,8 @@ class ReplyRequestProfileTest {
     @Test fun recordsRequestedBudgetWithoutRawEndpoint() {
         val profile = ReplyRequestProfile.from(config)
         assertEquals(64000, profile.completionBudget)
-        assertTrue(profile.detail().contains("requested 64000"))
-        assertFalse(profile.detail().contains("cleanapis.com"))
+        assertEquals("Asked for a 64000 token budget", profile.requestNote())
+        assertFalse(profile.providerLabel.contains("cleanapis.com"))
         val encoded = Json.encodeToString(ReplyRequestProfile.serializer(), profile)
         assertFalse(encoded.contains("https://"))
         assertEquals(profile, Json.decodeFromString(ReplyRequestProfile.serializer(), encoded))

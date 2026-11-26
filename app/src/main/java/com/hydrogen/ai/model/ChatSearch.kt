@@ -81,7 +81,7 @@ object ChatSearch {
     /**
      * Text prepared for searching and previews: drop lines whose trimmed start is ``` (fence markers only; the
      * code inside is kept as written). Outside code, drop table rule rows and horizontal rules, show table cells
-     * as "a · b" and remove list bullets and quote marks at the start of a line. Then remove '*', '_', '`' and
+     * as "a, b" and remove list bullets and quote marks at the start of a line. Then remove '*', '_', '`' and
      * '#', collapse whitespace runs to one space and trim.
      */
     fun plain(markdown: String): String {
@@ -99,7 +99,7 @@ object ChatSearch {
             if (ruleLine.matches(line)) continue
             val trimmed = line.trim()
             lines += if (trimmed.startsWith("|")) {
-                trimmed.removePrefix("|").removeSuffix("|").split('|').joinToString(" · ") { it.trim().replace(markdownChars, "") }
+                trimmed.removePrefix("|").removeSuffix("|").split('|').joinToString(", ") { it.trim().replace(markdownChars, "") }
             } else {
                 line.replaceFirst(lineMarker, "").replace(markdownChars, "")
             }

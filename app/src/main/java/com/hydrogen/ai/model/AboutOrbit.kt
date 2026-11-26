@@ -19,10 +19,10 @@ object AboutOrbit {
         "Messages go only to the model you pick, and to your PC once you pair it."
     )
 
-    const val EARLY_NOTE = "This is an early version. Back up your chats from the chat list now and then."
+    const val EARLY_NOTE = "This is an early version. Back up your chats now and then."
 
     const val WHATS_NEW = "What's new"
-    const val PRIVACY = "Privacy & data"
+    const val PRIVACY = "Privacy and data"
     const val LICENSES = "Open source licenses"
 
     const val APACHE_2 = "Apache License 2.0"

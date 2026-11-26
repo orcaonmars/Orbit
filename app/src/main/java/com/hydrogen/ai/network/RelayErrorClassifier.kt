@@ -165,7 +165,7 @@ object RelayErrorClassifier {
             listOf("unsupported", "not supported", "invalid", "not allowed", "unknown", "unrecognized", "not permitted")
                 .any { bodyLower.contains(it) }) {
             return error(ProviderErrorCategory.BAD_REQUEST_400,
-                "The model or provider rejected this reasoning setting. Select Automatic in the composer or Models & API keys, then retry.",
+                "The model or provider rejected this reasoning setting. Select Automatic in the composer or Models and providers, then retry.",
                 "provider_reasoning")
         }
 
@@ -173,7 +173,7 @@ object RelayErrorClassifier {
             return error(
                 ProviderErrorCategory.MODEL_NOT_FOUND,
                 "${svc ?: "The server"} doesn't have this model, or your key can't use it. Pick another model, or " +
-                    "tap Load models in Models & API keys.",
+                    "tap Find models in Models and providers.",
                 LAYER_MODEL
             )
         }
@@ -208,9 +208,9 @@ object RelayErrorClassifier {
             LAYER_KEY
         }
         val keyMessage = if (keyOwner != null) {
-            "$keyOwner didn't accept your API key. Check or replace it in Models & API keys."
+            "$keyOwner didn't accept your API key. Check or replace it in Models and providers."
         } else {
-            "The service didn't accept your API key. Check or replace it in Models & API keys."
+            "The service didn't accept your API key. Check or replace it in Models and providers."
         }
 
         return when (statusCode) {
@@ -232,7 +232,7 @@ object RelayErrorClassifier {
                 } else {
                     error(
                         ProviderErrorCategory.UNAUTHORIZED_RELAY_401,
-                        "Your server didn't accept the key. Check it in Models & API keys.",
+                        "Your server didn't accept the key. Check it in Models and providers.",
                         "local_relay"
                     )
                 }
@@ -260,7 +260,7 @@ object RelayErrorClassifier {
 
             404 -> error(
                 ProviderErrorCategory.UNKNOWN_PROTOCOL,
-                "Orbit couldn't find a chat service at this address. Check the server address in Models & API keys.",
+                "Orbit couldn't find a chat service at this address. Check the server address in Models and providers.",
                 "relay"
             )
 

@@ -106,7 +106,7 @@ fun DictationToolbar(speech: InAppSpeech, onCancel: () -> Unit, onDone: () -> Un
     val colors = OrbitTheme.colors
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onCancel) {
-            Icon(Icons.Rounded.Close, contentDescription = "Cancel recording", tint = colors.muted)
+            Icon(com.hydrogen.ai.ui.OrbitIcons.Close, contentDescription = "Cancel recording", tint = colors.muted)
         }
         Box(
             modifier = Modifier
@@ -124,7 +124,7 @@ fun DictationToolbar(speech: InAppSpeech, onCancel: () -> Unit, onDone: () -> Un
             modifier = Modifier.padding(horizontal = 10.dp)
         )
         SunButton(
-            icon = Icons.Rounded.Check,
+            icon = com.hydrogen.ai.ui.OrbitIcons.Check,
             contentDescription = "Stop and keep the text",
             onClick = onDone,
             enabled = !speech.finishing
@@ -293,14 +293,14 @@ fun VoiceChatScreen(
                 label = if (muted) "Turn mic on" else "Mute mic",
                 background = colors.surface2
             ) {
-                Icon(if (muted) Icons.Rounded.MicOff else Icons.Rounded.Mic, contentDescription = null, tint = colors.text)
+                Icon(if (muted) com.hydrogen.ai.ui.OrbitIcons.MicOff else com.hydrogen.ai.ui.OrbitIcons.Mic, contentDescription = null, tint = colors.text)
             }
             VoiceRoundButton(
                 onClick = onEnd,
                 label = "End voice chat",
                 background = colors.negative.copy(alpha = 0.18f)
             ) {
-                Icon(Icons.Rounded.Close, contentDescription = null, tint = colors.negative)
+                Icon(com.hydrogen.ai.ui.OrbitIcons.Close, contentDescription = null, tint = colors.negative)
             }
         }
     }

@@ -185,7 +185,7 @@ private fun TableView(table: MdBlock.Table) {
             with(density) { widest.toDp() }.coerceIn(24.dp, 220.dp) + (TABLE_CELL_PADDING_H * 2).dp
         }
     }
-    val tableWidth = widths.fold(0.dp) { a, b -> a + b }
+    val naturalWidth = widths.fold(0.dp) { a, b -> a + b }
     val context = LocalContext.current
     fun copy(label: String, text: String) {
         if (!copyOrbitText(context, label, text)) {
@@ -199,11 +199,18 @@ private fun TableView(table: MdBlock.Table) {
     Column {
         Surface(shape = OrbitTheme.shapes.m, border = BorderStroke(1.dp, orbit.line),
             color = orbit.bg, contentColor = orbit.text, modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                TableRow(table.header, table.align, widths, header = true)
-                for (row in table.rows) {
-                    HorizontalDivider(thickness = 1.dp, color = orbit.line, modifier = Modifier.width(tableWidth))
-                    TableRow(row, table.align, widths, header = false)
+            BoxWithConstraints {
+                // A narrow table fills the card (columns grow in proportion) so the header shade and rules run edge
+                // to edge instead of stopping halfway; a wide one keeps its measured widths and scrolls sideways.
+                val stretch = if (naturalWidth < maxWidth && naturalWidth > 0.dp) maxWidth / naturalWidth else 1f
+                val shown = if (stretch > 1f) widths.map { it * stretch } else widths
+                val tableWidth = if (stretch > 1f) maxWidth else naturalWidth
+                Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+                    TableRow(table.header, table.align, shown, header = true, width = tableWidth)
+                    for (row in table.rows) {
+                        HorizontalDivider(thickness = 1.dp, color = orbit.line, modifier = Modifier.width(tableWidth))
+                        TableRow(row, table.align, shown, header = false, width = tableWidth)
+                    }
                 }
             }
         }
@@ -211,14 +218,16 @@ private fun TableView(table: MdBlock.Table) {
         FlowRow(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
             TextButton(
                 onClick = { copy("Table", TableCsv.toTsv(table)) },
+                colors = quietActionColors(),
                 contentPadding = PaddingValues(horizontal = space.s)
             ) {
-                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
+                Icon(OrbitIcons.Copy, contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
                 Text(stringResource(R.string.reply_table_copy), style = MaterialTheme.typography.labelMedium)
             }
             TextButton(
                 onClick = { copy("CSV", TableCsv.toCsv(table)) },
+                colors = quietActionColors(),
                 contentPadding = PaddingValues(horizontal = space.s)
             ) {
                 Text(stringResource(R.string.reply_csv_copy), style = MaterialTheme.typography.labelMedium)
@@ -232,9 +241,9 @@ private const val TABLE_CELL_PADDING_H = 12
 private const val TABLE_CELL_PADDING_V = 10
 
 @Composable
-private fun TableRow(cells: List<List<MdSpan>>, align: List<MdAlign>, widths: List<Dp>, header: Boolean) {
+private fun TableRow(cells: List<List<MdSpan>>, align: List<MdAlign>, widths: List<Dp>, header: Boolean, width: Dp) {
     Row(
-        modifier = if (header) Modifier.background(OrbitTheme.colors.surface2) else Modifier
+        modifier = Modifier.width(width).then(if (header) Modifier.background(OrbitTheme.colors.surface2) else Modifier)
     ) {
         cells.forEachIndexed { c, spans ->
             Text(
@@ -426,20 +435,28 @@ private fun CodeHeaderActions(
     onSave: () -> Unit
 ) {
     val space = OrbitTheme.space
-    TextButton(onClick = onCopy, contentPadding = PaddingValues(horizontal = space.s),
+    TextButton(onClick = onCopy, colors = quietActionColors(), contentPadding = PaddingValues(horizontal = space.s),
         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
-        Icon(if (copied) OrbitIcons.Check else Icons.Default.ContentCopy,
+        Icon(if (copied) OrbitIcons.Check else OrbitIcons.Copy,
             contentDescription = null, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(space.xs))
         Text(stringResource(if (copied) R.string.reply_code_copied else R.string.reply_code_copy),
             style = MaterialTheme.typography.labelMedium)
     }
     if (canSave) {
-        TextButton(onClick = onSave, enabled = saveEnabled, contentPadding = PaddingValues(horizontal = space.s)) {
+        TextButton(onClick = onSave, enabled = saveEnabled, colors = quietActionColors(), contentPadding = PaddingValues(horizontal = space.s)) {
             Text(stringResource(R.string.reply_code_save), style = MaterialTheme.typography.labelMedium)
         }
     }
 }
+
+/**
+ * Copy, Save and the table actions sit beside the answer, so they use the muted text colour instead of the accent:
+ * the reply stays the loudest thing in the bubble, as in other chat apps. They still read as buttons by their icon,
+ * ripple and 48 dp touch target.
+ */
+@Composable
+private fun quietActionColors() = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = OrbitTheme.colors.muted)
 
 @Composable
 private fun rememberAnnotated(spans: List<MdSpan>): AnnotatedString {

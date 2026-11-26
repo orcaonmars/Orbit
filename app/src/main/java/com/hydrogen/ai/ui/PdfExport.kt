@@ -157,6 +157,8 @@ object PdfExport {
         strokeWidth = width
     }
 
+    // Layout.BREAK_STRATEGY_* and LineBreaker.BREAK_STRATEGY_* share values; LineBreaker needs API 29.
+    @android.annotation.SuppressLint("WrongConstant")
     private fun layout(
         text: CharSequence,
         paint: TextPaint,

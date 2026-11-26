@@ -70,7 +70,7 @@ fun DiagnosticsSheet(
                 }
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = {
+                    OutlinedButton(shape = com.hydrogen.ai.ui.OrbitButtonShape, onClick = {
                         clipboard.setText(
                             AnnotatedString(ErrorExplainer.reportAll(entries, BuildConfig.VERSION_NAME))
                         )
@@ -87,7 +87,7 @@ fun DiagnosticsSheet(
                         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(entry.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                             Text(
-                                "${entry.service ?: entry.serverHost.ifBlank { "Local service" }} · " +
+                                "${entry.service ?: entry.serverHost.ifBlank { "Local service" }}, " +
                                     ErrorExplainer.formatTime(entry.atEpochMs),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -127,7 +127,7 @@ fun DiagnosticsSheet(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Done") }
+            Button(shape = com.hydrogen.ai.ui.OrbitButtonShape, onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Done") }
         }
     }
     if (confirmClear) {

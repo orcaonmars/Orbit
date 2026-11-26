@@ -57,7 +57,7 @@ fun PersonaEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Outlined.Face, contentDescription = null) },
+        icon = { Icon(com.hydrogen.ai.ui.OrbitIcons.Person, contentDescription = null) },
         title = { Text(if (editing == null) "Create an assistant" else "Edit ${editing.name}") },
         text = {
             Column(

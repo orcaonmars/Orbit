@@ -133,7 +133,7 @@ fun RelaySettingsSheet(
     onAddBackupKey: (String) -> Unit = {},
     onRemoveBackupKey: (Int) -> Unit = {}
 ) {
-    // "Load models" saves the draft first, which changes relayConfig. A blank model is stored as the relay
+    // "Find models" saves the draft first, which changes relayConfig. A blank model is stored as the relay
     // placeholder, so detect() alone would flip the sheet from Custom/LM Studio to "Self-hosted relay" and put
     // the placeholder back in the model box. While the sheet is open, the card the user saved with wins.
     var savedWith by remember { mutableStateOf<ProviderPreset?>(null) }
@@ -403,8 +403,8 @@ fun RelaySettingsSheet(
             )
             keyPageFor(preset)?.let { page ->
                 OutlinedButton(
+                    shape = com.hydrogen.ai.ui.OrbitButtonShape,
                     onClick = { runCatching { uriHandler.openUri(page) } },
-                    shape = RoundedCornerShape(24.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("Get a key from ${preset.title}") }
             }
@@ -480,12 +480,12 @@ fun RelaySettingsSheet(
                             )
                             Spacer(Modifier.width(8.dp))
                             OutlinedButton(
+                                shape = com.hydrogen.ai.ui.OrbitButtonShape,
                                 onClick = {
                                     onAddBackupKey(backupInput)
                                     backupInput = ""
                                 },
-                                enabled = backupInput.isNotBlank(),
-                                shape = RoundedCornerShape(20.dp)
+                                enabled = backupInput.isNotBlank()
                             ) { Text("Add") }
                         }
                     }
@@ -539,6 +539,7 @@ fun RelaySettingsSheet(
             }
             run {
                 OutlinedButton(
+                    shape = com.hydrogen.ai.ui.OrbitButtonShape,
                     onClick = {
                         val problem = ProviderPresets.validate(preset, baseUrl, modelId, requireModel = false)
                         val needsKey = preset.keyRequired && !LocalServerPresets.isLocalServer(effectiveUrl) &&
@@ -552,8 +553,7 @@ fun RelaySettingsSheet(
                         }
                     },
                     enabled = !modelList.isLoading && effectiveUrl.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(20.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         when {
@@ -613,11 +613,11 @@ fun RelaySettingsSheet(
             }
             SectionLabel("3. Connect")
             Button(
+                shape = com.hydrogen.ai.ui.OrbitButtonShape,
                 onClick = { if (persistDraftIfValid()) { onCheckHealth() } },
                 enabled = !isCheckingHealth && !modelList.isLoading,
-                shape = RoundedCornerShape(24.dp),
                 modifier = Modifier.fillMaxWidth().height(48.dp)
-            ) { Text(if (isCheckingHealth) "Checking connection..." else "Save & test connection") }
+            ) { Text(if (isCheckingHealth) "Checking connection…" else "Save and test connection") }
             TextButton(
                 onClick = { if (persistDraftIfValid()) onDismiss() },
                 enabled = !isCheckingHealth && !modelList.isLoading,
@@ -632,7 +632,7 @@ fun RelaySettingsSheet(
             }
             TextButton(onClick = { showAdvanced = !showAdvanced }) {
                 Text(if (showAdvanced) "Hide advanced settings" else "Advanced settings")
-                Icon(if (showAdvanced) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, null)
+                Icon(if (showAdvanced) com.hydrogen.ai.ui.OrbitIcons.ChevronUp else com.hydrogen.ai.ui.OrbitIcons.ChevronDown, null)
             }
             if (showAdvanced) {
             if (preset.route == ProviderRoute.GOOGLE_AI_STUDIO_DIRECT) {
@@ -666,7 +666,7 @@ fun RelaySettingsSheet(
             if (supportsEffort && cleanApisBudget) Text("Clean APIs controls total completion tokens, including reasoning and answer. Higher limits do not guarantee deeper thinking and may be rejected by the upstream model.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (supportsEffort && !cleanApisBudget) Text("Automatic uses model defaults. Higher effort can increase latency and token usage. Unsupported levels are disabled. On OpenRouter, the upstream model may map the requested effort to its nearest supported level.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedButton(onClick = onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(shape = com.hydrogen.ai.ui.OrbitButtonShape, onClick = onOpenDiagnostics, modifier = Modifier.fillMaxWidth()) {
                 Text("Connection diagnostics")
             }
                 OutlinedTextField(
@@ -782,7 +782,7 @@ private fun ProviderOptionRow(preset: ProviderPreset, selected: Boolean, onClick
             }
             if (selected) {
                 Icon(
-                    imageVector = Icons.Filled.CheckCircle,
+                    imageVector = com.hydrogen.ai.ui.OrbitIcons.Check,
                     contentDescription = "Selected",
                     tint = MaterialTheme.colorScheme.primary
                 )
@@ -819,7 +819,7 @@ private fun ModelChoiceList(ids: List<String>, selectedId: String, onPick: (Stri
                         )
                         if (id == selectedId) {
                             Icon(
-                                imageVector = Icons.Filled.CheckCircle,
+                                imageVector = com.hydrogen.ai.ui.OrbitIcons.Check,
                                 contentDescription = "Selected",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)

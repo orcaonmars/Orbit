@@ -16,6 +16,7 @@ import androidx.compose.ui.platform.LocalContext
 import com.hydrogen.ai.model.PlaybackGeneration
 import com.hydrogen.ai.model.ReplyPlaybackPolicy
 import com.hydrogen.ai.model.SpeakableText
+import com.hydrogen.ai.model.TtsVoiceRanker
 import com.hydrogen.ai.model.VoiceConversation
 
 /**
@@ -139,6 +140,7 @@ class MessageSpeaker(context: Context) {
                     ready = true
                     tts?.setOnUtteranceProgressListener(listener)
                     tts?.setSpeechRate(speed)
+                    chooseBestVoice()
                     if (!paused) pending?.let { (id, chunks) -> speakNow(id, chunks) }
                 } else {
                     val failedId = speakingId
@@ -150,6 +152,28 @@ class MessageSpeaker(context: Context) {
                 }
                 pending = null
             }
+        }
+    }
+
+    /** Swaps the engine's default voice for its best installed on-device voice in the phone's language, if any. */
+    private fun chooseBestVoice() {
+        val engine = tts ?: return
+        runCatching {
+            val locale = java.util.Locale.getDefault()
+            val voices = engine.voices?.toList().orEmpty()
+            val candidates = voices.map { v ->
+                TtsVoiceRanker.Candidate(
+                    name = v.name,
+                    language = v.locale.language,
+                    country = v.locale.country,
+                    quality = v.quality,
+                    latency = v.latency,
+                    needsNetwork = v.isNetworkConnectionRequired,
+                    notInstalled = v.features?.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) == true
+                )
+            }
+            val best = TtsVoiceRanker.pick(candidates, locale.language, locale.country) ?: return
+            voices.firstOrNull { it.name == best.name }?.let { engine.voice = it }
         }
     }
 

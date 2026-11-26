@@ -61,7 +61,7 @@ internal fun AskPcSuggestionCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Computer,
+                    imageVector = com.hydrogen.ai.ui.OrbitIcons.Computer,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(18.dp)
@@ -111,9 +111,9 @@ internal fun AskPcSuggestionCard(
             if (action != null && label != null) {
                 when (action) {
                     AskPcCardAction.SEND, AskPcCardAction.SEND_AGAIN, AskPcCardAction.RUN, AskPcCardAction.ADD_RESULT ->
-                        Button(onClick = { onAction(action) }, enabled = model.actionEnabled) { Text(label) }
+                        Button(shape = com.hydrogen.ai.ui.OrbitButtonShape, onClick = { onAction(action) }, enabled = model.actionEnabled) { Text(label) }
                     AskPcCardAction.OPEN_COMPANION, AskPcCardAction.CHECK_APPROVAL, AskPcCardAction.CHECK_TASK ->
-                        OutlinedButton(onClick = { onAction(action) }, enabled = model.actionEnabled) { Text(label) }
+                        OutlinedButton(shape = com.hydrogen.ai.ui.OrbitButtonShape, onClick = { onAction(action) }, enabled = model.actionEnabled) { Text(label) }
                 }
             }
         }

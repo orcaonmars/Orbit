@@ -13,7 +13,7 @@ object EditResendPolicy {
         val message = messages[index]
         if (message.role != MessageRole.USER) return false
         // Never rewrite history around a reply that is still doing work on the PC.
-        return messages.drop(index).none { it.hasSideEffectsInProgress }
+        return (index until messages.size).none { messages[it].hasSideEffectsInProgress }
     }
 
     /** Messages kept when [messageId] is edited and resent, or null when it is not in the chat. */

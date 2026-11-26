@@ -62,7 +62,7 @@ fun PrivacySheet(
                 .padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("Privacy & data", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+            Text("Privacy and data", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
 
             PrivacySummary.sections(facts).forEach { section ->
                 Surface(
@@ -96,6 +96,7 @@ fun PrivacySheet(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             OutlinedButton(
+                shape = com.hydrogen.ai.ui.OrbitButtonShape,
                 onClick = { typed = ""; confirming = true },
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                 modifier = Modifier.fillMaxWidth()

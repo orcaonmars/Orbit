@@ -89,20 +89,20 @@ object SavedConnections {
         return current.sameTarget(connection)
     }
 
-    /** Where the model runs, in words: "Google AI Studio", "LM Studio · 10.0.2.2", "api.example.com". */
+    /** Where the model runs, in words: "Google AI Studio", "LM Studio, 10.0.2.2", "api.example.com". */
     fun serverLabel(connection: SavedConnection): String {
         if (connection.route == ProviderRoute.GOOGLE_AI_STUDIO_DIRECT) {
-            return if (connection.webSearchEnabled) "Google AI Studio · web search" else "Google AI Studio"
+            return if (connection.webSearchEnabled) "Google AI Studio, web search" else "Google AI Studio"
         }
         val url = ProviderPresets.normalizeBaseUrl(connection.baseUrl)
         val uri = runCatching { java.net.URI(url) }.getOrNull()
         val host = uri?.host ?: return url.ifEmpty { "Server" }
         val config = RelayConfig(route = connection.route, baseUrl = url, modelId = connection.modelId)
         return when (ProviderPresets.detect(config)) {
-            ProviderPreset.LM_STUDIO -> "LM Studio · $host"
-            ProviderPreset.OLLAMA -> "Ollama · $host"
+            ProviderPreset.LM_STUDIO -> "LM Studio, $host"
+            ProviderPreset.OLLAMA -> "Ollama, $host"
             ProviderPreset.CLEAN_APIS -> "Clean APIs"
-            ProviderPreset.HYDROGEN_RELAY -> "Relay · $host"
+            ProviderPreset.HYDROGEN_RELAY -> "Relay, $host"
             else -> if (uri.port != -1) "$host:${uri.port}" else host
         }
     }

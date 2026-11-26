@@ -111,7 +111,7 @@ fun DocumentCard(document: ReplyPart.Document, streaming: Boolean, showTextToggl
     val subtitle = when {
         writing -> "Writing the document…"
         state is DocumentState.Failed -> "Couldn't make the PDF. Show text to read it here."
-        ready != null -> "PDF · ${ready.pages} ${if (ready.pages == 1) "page" else "pages"}"
+        ready != null -> "PDF, ${ready.pages} ${if (ready.pages == 1) "page" else "pages"}"
         else -> "Making the PDF…"
     }
 
@@ -145,7 +145,7 @@ fun DocumentCard(document: ReplyPart.Document, streaming: Boolean, showTextToggl
                             color = orbit.accent,
                             modifier = Modifier.size(20.dp)
                         )
-                        else -> Icon(Icons.Outlined.PictureAsPdf, contentDescription = null, tint = orbit.muted)
+                        else -> Icon(com.hydrogen.ai.ui.OrbitIcons.File, contentDescription = null, tint = orbit.muted)
                     }
                 }
                 Spacer(Modifier.width(14.dp))
@@ -173,12 +173,13 @@ fun DocumentCard(document: ReplyPart.Document, streaming: Boolean, showTextToggl
                 val compact = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(
+                        shape = com.hydrogen.ai.ui.OrbitButtonShape,
                         onClick = { openPdf(context, ready.file) },
                         contentPadding = compact,
                         modifier = Modifier.semantics { contentDescription = "Open ${document.title}" }
                     ) { Text("Open") }
-                    OutlinedButton(onClick = { sharePdf(context, ready.file) }, contentPadding = compact) { Text("Share") }
-                    OutlinedButton(onClick = { saveLauncher.launch(ready.file.name) }, contentPadding = compact) { Text("Save") }
+                    OutlinedButton(shape = com.hydrogen.ai.ui.OrbitButtonShape, onClick = { sharePdf(context, ready.file) }, contentPadding = compact) { Text("Share") }
+                    OutlinedButton(shape = com.hydrogen.ai.ui.OrbitButtonShape, onClick = { saveLauncher.launch(ready.file.name) }, contentPadding = compact) { Text("Save") }
                 }
             }
             if (showTextToggle && !writing) {
@@ -209,7 +210,7 @@ fun MakePdfOffer(content: String) {
         )
     } else {
         TextButton(onClick = { made = true }, contentPadding = PaddingValues(horizontal = 4.dp)) {
-            Icon(Icons.Outlined.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
+            Icon(com.hydrogen.ai.ui.OrbitIcons.File, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text("Make a PDF")
         }

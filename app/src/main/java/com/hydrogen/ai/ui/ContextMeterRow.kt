@@ -32,7 +32,8 @@ import com.hydrogen.ai.ui.theme.OrbitTheme
 /**
  * The context ring above the composer (docs/ORBIT_DESIGN.md, Composer): hidden until a chat uses half of the
  * model's context budget, then a 16 dp ring that fills as the chat grows, with one plain line beside it. The ring
- * turns amber near the limit and red once the oldest messages stop being sent.
+ * turns amber near the limit. Trimming old messages is routine in a long chat, so it stays quiet (muted text, amber
+ * ring); only a prompt that may not fit at all is shown in red.
  */
 @Composable
 fun ContextMeterRow(usage: ContextUsage?, modifier: Modifier = Modifier) {
@@ -46,8 +47,8 @@ fun ContextMeterRow(usage: ContextUsage?, modifier: Modifier = Modifier) {
         val scheme = MaterialTheme.colorScheme
         val orbit = OrbitTheme.colors
         val tint = when (level) {
-            ContextUsage.Level.TRIMMED, ContextUsage.Level.OVER_LIMIT -> scheme.error
-            ContextUsage.Level.NEAR -> scheme.tertiary
+            ContextUsage.Level.OVER_LIMIT -> scheme.error
+            ContextUsage.Level.NEAR, ContextUsage.Level.TRIMMED -> scheme.tertiary
             else -> orbit.accent
         }
         val progress by animateFloatAsState(
@@ -65,7 +66,7 @@ fun ContextMeterRow(usage: ContextUsage?, modifier: Modifier = Modifier) {
             Text(
                 text = usage?.label.orEmpty(),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (level == ContextUsage.Level.NOTICE) orbit.muted else tint,
+                color = if (level == ContextUsage.Level.OVER_LIMIT) tint else orbit.muted,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )

@@ -61,4 +61,20 @@ class ShareIntentParserTest {
         assertEquals("mine\n\nshared", ShareIntentParser.mergeIntoDraft("mine  ", "shared"))
         assertEquals("mine", ShareIntentParser.mergeIntoDraft("mine", null))
     }
+
+    @Test
+    fun ownFileProviderStreamsAreNeverRead() {
+        assertTrue(!ShareIntentParser.isAcceptableStream("content://com.hydrogen.ai.fileprovider/camera/a.jpg"))
+        assertTrue(!ShareIntentParser.isAcceptableStream("CONTENT://com.hydrogen.ai.debug.fileprovider/documents/x.pdf"))
+        assertTrue(!ShareIntentParser.isAcceptableStream("content://0@com.hydrogen.ai.fileprovider/camera/a.jpg"))
+        assertTrue(!ShareIntentParser.isAcceptableStream("content:///nothing"))
+        assertTrue(ShareIntentParser.isAcceptableStream("content://media/external/images/media/12"))
+        assertTrue(ShareIntentParser.isAcceptableStream("content://com.hydrogen.aimore.provider/x"))
+        val shared = ShareIntentParser.parse(
+            ShareIntentParser.ACTION_SEND, "image/jpeg", null, null,
+            listOf("content://com.hydrogen.ai.fileprovider/camera/a.jpg")
+        )
+        assertEquals(1, shared?.droppedItems)
+        assertTrue(shared!!.imageUris.isEmpty())
+    }
 }

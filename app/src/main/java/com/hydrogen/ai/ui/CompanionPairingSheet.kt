@@ -109,6 +109,7 @@ fun CompanionPairingSheet(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 OutlinedButton(
+                    shape = com.hydrogen.ai.ui.OrbitButtonShape,
                     onClick = { onCheckHealth(baseUrl, deviceName) },
                     enabled = !busy
                 ) {
@@ -313,6 +314,7 @@ private fun CompanionPairingActions(
             modifier = Modifier.fillMaxWidth()
         )
         Button(
+            shape = com.hydrogen.ai.ui.OrbitButtonShape,
             onClick = onPair,
             enabled = !pairingBusy && normalized.pairingId.isNotBlank() && normalized.pairingCode.isNotBlank(),
             modifier = Modifier.fillMaxWidth()
@@ -332,12 +334,14 @@ private fun CompanionPairingActions(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Button(
+                shape = com.hydrogen.ai.ui.OrbitButtonShape,
                 onClick = onRevoke,
                 enabled = !pairingBusy
             ) {
                 Text(if (companionState.isRevoking) "Unpairing…" else "Unpair")
             }
             OutlinedButton(
+                shape = com.hydrogen.ai.ui.OrbitButtonShape,
                 onClick = onClearLocalSession,
                 enabled = !pairingBusy
             ) {
@@ -522,6 +526,7 @@ private fun CompanionWorkSection(
     }
 
     Button(
+        shape = com.hydrogen.ai.ui.OrbitButtonShape,
         onClick = {
             val cleanSummary = summary.trim().ifEmpty {
                 "${selectedAction.displayName}: ${targetPath.trim()}"
@@ -562,7 +567,7 @@ private fun CompanionApprovalCard(
         ) {
             // "Approval " stays at the start: QA scripts match it on screen.
             Text(
-                text = "Approval request · " +
+                text = "Approval request: " +
                     (WorkActionType.values().firstOrNull { it.wireName == approval.actionType }?.displayName ?: approval.actionType),
                 style = MaterialTheme.typography.labelLarge,
                 fontWeight = FontWeight.SemiBold
@@ -597,7 +602,7 @@ private fun CompanionApprovalCard(
             )
             // The ID matches the request shown in Orbit PC Companion on the PC.
             Text(
-                text = "Request ${approval.approvalId} · ${approval.status}",
+                text = "Request ${approval.approvalId}, ${approval.status}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -609,6 +614,7 @@ private fun CompanionApprovalCard(
             ) {
                 if (approval.status == "PENDING" && isPollingApproval) {
                     OutlinedButton(
+                        shape = com.hydrogen.ai.ui.OrbitButtonShape,
                         onClick = onStopWaitingForApproval,
                         enabled = !pairingBusy
                     ) {
@@ -616,12 +622,14 @@ private fun CompanionApprovalCard(
                     }
                 } else if (approval.status == "PENDING") {
                     OutlinedButton(
+                        shape = com.hydrogen.ai.ui.OrbitButtonShape,
                         onClick = onRefreshApproval,
                         enabled = !busy
                     ) {
                         Text("Check Once")
                     }
                     OutlinedButton(
+                        shape = com.hydrogen.ai.ui.OrbitButtonShape,
                         onClick = onWaitForApproval,
                         enabled = !busy
                     ) {
@@ -630,6 +638,7 @@ private fun CompanionApprovalCard(
                 }
                 if (approval.status == "APPROVED") {
                     Button(
+                        shape = com.hydrogen.ai.ui.OrbitButtonShape,
                         onClick = onStartWorkTask,
                         enabled = !busy
                     ) {
@@ -677,7 +686,7 @@ private fun CompanionWorkTaskCard(
             )
             Text(
                 text = (WorkActionType.values().firstOrNull { it.wireName == task.actionType }?.displayName ?: task.actionType) +
-                    " · ${task.targetName}",
+                    ", ${task.targetName}",
                 style = MaterialTheme.typography.bodySmall
             )
             task.error?.takeIf { it.isNotBlank() }?.let { err ->
@@ -688,7 +697,7 @@ private fun CompanionWorkTaskCard(
                 )
             }
             Text(
-                text = "Task ${task.taskId} · ${task.status}",
+                text = "Task ${task.taskId}, ${task.status}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -699,12 +708,14 @@ private fun CompanionWorkTaskCard(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     OutlinedButton(
+                        shape = com.hydrogen.ai.ui.OrbitButtonShape,
                         onClick = onRefreshWorkTask,
                         enabled = !busy
                     ) {
                         Text(if (isRunningWorkTask) "Polling..." else "Refresh Task")
                     }
                     OutlinedButton(
+                        shape = com.hydrogen.ai.ui.OrbitButtonShape,
                         onClick = onCancelWorkTask,
                         enabled = !pairingBusy && !isCancellingWorkTask
                     ) {
@@ -752,7 +763,7 @@ private fun WorkTaskResultPreview(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Directory: ${result.directoryName ?: "-"} · ${result.entryCount ?: result.entries.size} entries" +
+                        text = "Directory: ${result.directoryName ?: "-"}, ${result.entryCount ?: result.entries.size} entries" +
                             if (result.truncated) " (truncated)" else "",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
@@ -816,9 +827,9 @@ private fun WorkTaskResultPreview(
                 val bytesRead = result.bytesRead ?: 0
                 val totalBytes = result.totalSizeBytes ?: 0L
                 val endOffset = startOffset + bytesRead
-                val encodingLabel = result.encoding?.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+                val encodingLabel = result.encoding?.takeIf { it.isNotBlank() }?.let { ", $it" }.orEmpty()
                 Text(
-                    text = "File: ${result.fileName ?: "-"} · $startOffset..$endOffset/$totalBytes B$encodingLabel" +
+                    text = "File: ${result.fileName ?: "-"}, $startOffset..$endOffset/$totalBytes B$encodingLabel" +
                         if (result.truncated) " (truncated)" else "",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold
@@ -849,6 +860,7 @@ private fun WorkTaskResultPreview(
                     if (result.truncated && bytesRead > 0 && currentTargetPath.isNotBlank()) {
                         val nextOffset = startOffset + bytesRead
                         OutlinedButton(
+                            shape = com.hydrogen.ai.ui.OrbitButtonShape,
                             onClick = {
                                 onStageWorkTarget(WorkActionType.READ_FILE_PREVIEW, currentTargetPath, nextOffset)
                             },
@@ -862,6 +874,7 @@ private fun WorkTaskResultPreview(
             }
             if (canInsertIntoDraft) {
                 OutlinedButton(
+                    shape = com.hydrogen.ai.ui.OrbitButtonShape,
                     onClick = onInsertResultIntoDraft,
                     enabled = !busy,
                     modifier = Modifier.fillMaxWidth()

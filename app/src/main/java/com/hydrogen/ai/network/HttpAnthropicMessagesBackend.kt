@@ -149,7 +149,7 @@ class HttpAnthropicMessagesBackend(
             return@withContext ChatDispatchResult.Failure(
                 ProviderError(
                     category = ProviderErrorCategory.UNCONFIGURED,
-                    userMessage = "Pick a model in Models & API keys first.",
+                    userMessage = "Pick a model in Models and providers first.",
                     sourceLayer = "client"
                 )
             )
@@ -482,7 +482,7 @@ class HttpAnthropicMessagesBackend(
             if (url == null || url.host.isNullOrBlank() || (scheme != "https" && scheme != "http")) {
                 return ProviderError(
                     category = ProviderErrorCategory.UNCONFIGURED,
-                    userMessage = "Enter the service's address, starting with https://, in Models & API keys.",
+                    userMessage = "Enter the service's address, starting with https://, in Models and providers.",
                     technicalDetail = "unusable address",
                     sourceLayer = "client"
                 )
@@ -499,7 +499,7 @@ class HttpAnthropicMessagesBackend(
             if (key.isEmpty() && !onThisDevice) {
                 return ProviderError(
                     category = ProviderErrorCategory.UNCONFIGURED,
-                    userMessage = "Add your ${service ?: "service's"} API key in Models & API keys.",
+                    userMessage = "Add your ${service ?: "service's"} API key in Models and providers.",
                     technicalDetail = "no key",
                     sourceLayer = "client"
                 )

@@ -100,6 +100,8 @@ object ModelDisplayName {
     private val SHORT_CODE = Regex("""[a-z]\d""")
     private val BRANDS = mapOf(
         "gpt" to "GPT", "oss" to "OSS", "deepseek" to "DeepSeek", "olmo" to "OLMo", "smollm" to "SmolLM",
-        "internlm" to "InternLM", "glm" to "GLM", "lfm" to "LFM", "vl" to "VL", "moe" to "MoE"
+        "internlm" to "InternLM", "glm" to "GLM", "lfm" to "LFM", "vl" to "VL", "moe" to "MoE",
+        // Plain acronyms that otherwise come out as "Qa" or "Ai".
+        "qa" to "QA", "ai" to "AI", "llm" to "LLM", "api" to "API", "ocr" to "OCR", "tts" to "TTS"
     )
 }

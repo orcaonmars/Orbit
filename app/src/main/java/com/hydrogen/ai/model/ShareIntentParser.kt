@@ -69,8 +69,14 @@ object ShareIntentParser {
     fun isAcceptableStream(uri: String): Boolean {
         val trimmed = uri.trim()
         if (!trimmed.regionMatches(0, "content://", 0, 10, ignoreCase = true)) return false
-        return trimmed.length > 10
+        val authority = trimmed.substring(10).substringBefore('/').substringAfterLast('@').lowercase()
+        if (authority.isEmpty()) return false
+        // Orbit's own FileProvider: another app must not be able to make Orbit read its private cache.
+        if (authority == OWN_PACKAGE || authority.startsWith("$OWN_PACKAGE.")) return false
+        return true
     }
+
+    private const val OWN_PACKAGE = "com.hydrogen.ai"
 
     /** Adds shared text to whatever the user had already typed, without losing it. */
     fun mergeIntoDraft(existingDraft: String, sharedText: String?): String {

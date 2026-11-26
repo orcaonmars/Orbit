@@ -156,3 +156,6 @@ fun SunButton(
         }
     }
 }
+
+/** Text buttons use a modest 12 dp corner, the same as OrbitButton, instead of Material's default full pill. */
+val OrbitButtonShape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)

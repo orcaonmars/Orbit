@@ -40,7 +40,7 @@ import com.hydrogen.ai.model.PersonalProfile
 
 /** Copy for the Personal sheet, kept together so it reads as one voice. */
 internal object PersonalCopy {
-    const val TITLE = "Personal"
+    const val TITLE = "Personalization"
     const val EXPLAINER =
         "Orbit adds this to every chat, temporary ones too. It stays on this phone. Leave a box empty to skip it."
     const val ABOUT_HINT = "Your work, what you're learning, anything that helps"
@@ -190,6 +190,7 @@ fun PersonalSheet(
                 ) { Text(PersonalCopy.CLEAR) }
                 Spacer(Modifier.weight(1f))
                 Button(
+                    shape = com.hydrogen.ai.ui.OrbitButtonShape,
                     onClick = { onSave(Personal.clean(draft)) },
                     enabled = changed
                 ) { Text(PersonalCopy.SAVE) }

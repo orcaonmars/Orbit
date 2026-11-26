@@ -157,7 +157,7 @@ object PdfMarkdown {
         val reply = messages.getOrNull(index) ?: return false
         if (reply.role != MessageRole.ASSISTANT || reply.status != MessageStatus.COMPLETED) return false
         if (reply.content.isBlank() || hasDocument(reply.content)) return false
-        val question = (index - 1 downTo 0).map { messages[it] }.firstOrNull { it.role == MessageRole.USER }
+        val question = (index - 1 downTo 0).asSequence().map { messages[it] }.firstOrNull { it.role == MessageRole.USER }
         return question != null && asksForPdf(question.content)
     }
 

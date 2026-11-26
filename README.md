@@ -9,6 +9,14 @@ pick a model, and talk. That's most of it.
 It's an alpha. The core stuff is solid and well tested, but it hasn't been on many phones yet, so expect a few rough
 edges.
 
+## What is new in 0.3.2-alpha
+
+- A two-level model switcher: recent and favorite models first, then one list per provider.
+- A new home screen with quiet start ideas; replies no longer dim while streaming or jump when they finish.
+- Settings, About and other sheets clear the navigation bar, including with 3-button navigation.
+- Pairing with a PC no longer crashes on Android 8 to 12, and read aloud picks the best on-device voice.
+- New line icons, 12 dp buttons and clearer labels and error messages.
+
 ## What is new in 0.3.1-alpha
 
 - A simpler provider picker and guided account, model, and connection setup.

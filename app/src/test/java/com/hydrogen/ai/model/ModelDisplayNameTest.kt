@@ -6,6 +6,12 @@ import org.junit.Test
 
 class ModelDisplayNameTest {
     @Test
+    fun plain_acronyms_keep_their_capitals() {
+        assertEquals("Orbit QA Model", ModelDisplayName.friendly("orbit-qa-model"))
+        assertEquals("My AI LLM", ModelDisplayName.friendly("my-ai-llm"))
+    }
+
+    @Test
     fun drops_publisher_and_folder_prefixes() {
         assertEquals("gemma-4-26b-a4b-it", ModelDisplayName.of("local-private/gemma-4-26b-a4b-it"))
         assertEquals("gemini-2.5-flash", ModelDisplayName.of("models/gemini-2.5-flash"))

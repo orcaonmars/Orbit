@@ -15,7 +15,7 @@ object ShareAnswer {
         if (answer.role != MessageRole.ASSISTANT || answer.status != MessageStatus.COMPLETED) return null
         val body = ConversationMarkdownExporter.messageText(answer)
         if (body.isEmpty()) return null
-        val question = (index - 1 downTo 0)
+        val question = (index - 1 downTo 0).asSequence()
             .map { messages[it] }
             .firstOrNull { it.role == MessageRole.USER && it.status != MessageStatus.STAGED }
             ?.content?.trim()?.takeIf { it.isNotBlank() }

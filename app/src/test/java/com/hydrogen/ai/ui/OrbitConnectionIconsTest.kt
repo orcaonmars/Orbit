@@ -46,12 +46,60 @@ class OrbitConnectionIconsTest {
     }
 
     @Test
+    fun replyActionsAndCodeCopyUseOrbitIcons() {
+        val chat = source("ChatScreen.kt")
+        listOf("Copy", "Stop", "Speaker", "Refresh", "Share", "Compare", "Branch", "Pin").forEach { icon ->
+            assertTrue("Missing OrbitIcons.$icon usage", chat.contains("OrbitIcons.$icon"))
+        }
+        listOf("Icons.Outlined.ContentCopy", "Icons.Default.MoreVert", "Icons.Filled.PushPin").forEach { old ->
+            assertFalse("ChatScreen still uses $old", chat.contains(old))
+        }
+        assertFalse(source("MarkdownMessage.kt").contains("Icons.Default.ContentCopy"))
+    }
+
+    @Test
+    fun chatScreenDrawsNoMaterialIcons() {
+        val chat = source("ChatScreen.kt")
+        val uses = Regex("(?<![A-Za-z.])Icons\\.(Default|Filled|Outlined|Rounded|AutoMirrored)\\.").findAll(chat).count()
+        assertTrue("ChatScreen still draws $uses Material icons", uses == 0)
+        assertTrue(chat.contains("label = \"composer-action\""))
+    }
+
+    @Test
+    fun textButtonsAreNotPills() {
+        val files = listOf(
+            "AskPcCardView.kt", "CompanionPairingSheet.kt", "DiagnosticsSheet.kt", "DocumentCard.kt",
+            "PersonalSheet.kt", "PrivacySheet.kt", "ProjectSheet.kt", "RelaySettingsSheet.kt", "WhatsNewSheet.kt"
+        )
+        val call = Regex("(?<![A-Za-z_.])(Button|OutlinedButton|FilledTonalButton|ElevatedButton)\\(")
+        for (name in files) {
+            val text = source(name)
+            for (m in call.findAll(text)) {
+                val head = text.substring(m.range.last + 1, minOf(text.length, m.range.last + 120))
+                assertTrue("$name has a pill button at ${m.range.first}", head.contains("OrbitButtonShape"))
+            }
+        }
+    }
+
+    @Test
+    fun settingsAndVoiceScreensDrawNoMaterialIcons() {
+        val material = Regex("(?<![A-Za-z.])Icons\\.(Default|Filled|Outlined|Rounded|AutoMirrored)\\.")
+        for (name in listOf("AboutSheet.kt", "RelaySettingsSheet.kt", "ReplyPlaybackBar.kt", "ProjectSheet.kt", "MemorySheet.kt", "DocumentCard.kt", "AskPcCardView.kt")) {
+            assertTrue("$name still draws Material icons", material.findAll(source(name)).count() == 0)
+        }
+    }
+
+    @Test
     fun connectionSwitcherKeepsActionsAndContentDescriptions() {
         val sheet = source("ConnectionSwitcherSheet.kt")
         assertTrue(sheet.contains("onSwitch(connection)"))
         assertTrue(sheet.contains("onRemove(connection)"))
-        assertTrue(sheet.contains("onClick = onRename"))
-        assertTrue(sheet.contains("onClick = onRemove"))
+        // Row actions live in one overflow menu per row (two-level switcher redesign).
+        assertTrue(sheet.contains("OrbitIcons.MoreHorizontal"))
+        assertTrue(sheet.contains("onClick = { menuOpen = false; onRename() }"))
+        assertTrue(sheet.contains("onClick = { menuOpen = false; onRemove() }"))
+        assertTrue(sheet.contains("onClick = { menuOpen = false; onPin() }"))
+        assertTrue(sheet.contains("OrbitIcons.ArrowBack"))
         assertTrue(sheet.contains("onOpenSettings"))
         assertTrue(sheet.contains("onDismiss()"))
         assertTrue(sheet.contains("contentDescription = \"In use\""))

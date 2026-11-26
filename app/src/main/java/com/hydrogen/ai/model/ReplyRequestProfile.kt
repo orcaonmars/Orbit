@@ -18,10 +18,14 @@ data class ReplyRequestProfile(
             requestedModel == other.requestedModel && reasoningMode == other.reasoningMode &&
             completionBudget == other.completionBudget
 
-    fun detail(): String = buildString {
-        append(providerLabel)
-        if (completionBudget != null) append(" / requested $completionBudget token budget")
-        else if (reasoningMode != ReasoningMode.AUTO) append(" / requested ${reasoningMode.label} effort")
+    /**
+     * What was asked of the model beyond the defaults, as its own short line under the reply header; null when
+     * nothing was (the header already names the model and service).
+     */
+    fun requestNote(): String? = when {
+        completionBudget != null -> "Asked for a $completionBudget token budget"
+        reasoningMode != ReasoningMode.AUTO -> "Asked for ${reasoningMode.label.lowercase()} effort"
+        else -> null
     }
 
     companion object {

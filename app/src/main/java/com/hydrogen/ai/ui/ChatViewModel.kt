@@ -1189,7 +1189,7 @@ class ChatViewModel(
         return when (val result = backend.listModels(config, token)) {
             is ModelListResult.Success -> ModelListUiState(
                 baseUrl = url, modelIds = result.modelIds,
-                message = "${result.modelIds.size} models found. Choose one, then connect.", reasoningModelIds = result.reasoningModelIds
+                message = (if (result.modelIds.size == 1) "1 model found" else "${result.modelIds.size} models found") + ". Choose one, then connect.", reasoningModelIds = result.reasoningModelIds
             )
             is ModelListResult.Failure -> ModelListUiState(baseUrl = url, message = result.message)
         }

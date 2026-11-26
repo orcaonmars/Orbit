@@ -32,7 +32,7 @@ internal fun ReplyPlaybackBar(speaker: MessageSpeaker) {
     ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = space.s), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { if (speaker.paused) speaker.resume() else speaker.pause() }) {
-                Icon(if (speaker.paused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                Icon(if (speaker.paused) com.hydrogen.ai.ui.OrbitIcons.Play else com.hydrogen.ai.ui.OrbitIcons.Pause,
                     contentDescription = stringResource(if (speaker.paused) R.string.reply_play_resume else R.string.reply_play_pause))
             }
             Column(Modifier.weight(1f)) {
@@ -55,7 +55,7 @@ internal fun ReplyPlaybackBar(speaker: MessageSpeaker) {
                 }
             }
             IconButton(onClick = speaker::stop) {
-                Icon(Icons.Default.Stop, contentDescription = stringResource(R.string.reply_play_stop))
+                Icon(com.hydrogen.ai.ui.OrbitIcons.Stop, contentDescription = stringResource(R.string.reply_play_stop))
             }
         }
     }

@@ -19,12 +19,10 @@
     <string name="memory_search">Search memory</string>
     <string name="memory_clear_search">Clear memory search</string>
     <string name="memory_no_matches">No matching notes</string>
-    <string name="switcher_title">Choose a service</string>
-    <string name="switcher_subtitle">Saved connections. Keys stay with their own service.</string>
-    <string name="switcher_back_services">Back to services</string>
-    <string name="switcher_recent">Recent models</string>
-    <string name="switcher_services">Services</string>
-    <string name="switcher_saved_count">Saved models: %1$d</string>
+    <string name="switcher_title">Models</string>
+    <string name="switcher_back_services">Back to providers</string>
+    <string name="switcher_recent">Recent</string>
+    <string name="switcher_services">Providers</string>
     <string name="memory_pin">Pin note</string>
     <string name="memory_unpin">Unpin note</string>
     <string name="studio_settings">Settings</string>
@@ -35,8 +33,8 @@
     <string name="saved_prompts_load_failed">Could not read saved prompts. Your existing file has not been overwritten.</string>
     <string name="saved_prompts_save_failed">Could not save changes. Your previous prompts are still shown.</string>
     <string name="saved_prompts_conflict">Saved prompts changed elsewhere. Reload before editing.</string>
-    <string name="saved_prompts_loading">Loading prompts...</string>
-    <string name="saved_prompts_saving">Saving prompts...</string>
+    <string name="saved_prompts_loading">Loading prompts…</string>
+    <string name="saved_prompts_saving">Saving prompts…</string>
     <string name="saved_prompts_retry">Retry loading</string>
     <string name="saved_prompts_delete_title">Delete saved prompt?</string>
     <string name="saved_prompts_delete">Delete</string>
@@ -54,8 +52,8 @@
     <string name="studio_settings_appearance">Appearance</string>
     <string name="studio_settings_appearance_hint">Theme, accent and text size</string>
     <string name="studio_settings_connections">Connections</string>
-    <string name="studio_settings_models">Models and API keys</string>
-    <string name="studio_settings_models_hint">Connect a service and select a model</string>
+    <string name="studio_settings_models">Models and providers</string>
+    <string name="studio_settings_models_hint">Connect a service, add an API key and pick a model</string>
     <string name="studio_settings_companion">PC Companion</string>
     <string name="studio_settings_information">Information</string>
     <string name="studio_settings_privacy">Privacy and data</string>
@@ -63,11 +61,6 @@
     <string name="markdown_copy">Copy</string>
     <string name="markdown_copied">Copied</string>
     <string name="markdown_copy_failed">Could not copy to the clipboard</string>
-    <string name="markdown_copy_table">Copy table</string>
-    <string name="markdown_copy_csv">Copy CSV</string>
-    <string name="markdown_save">Save</string>
-    <string name="markdown_saved">Saved</string>
-    <string name="markdown_save_failed">Could not save the file</string>
     <string name="chat_jump_to_latest">Jump to latest</string>
     <string name="studio_settings_data">Data controls</string>
     <string name="studio_settings_local_profile">Local profile and preferences</string>
@@ -92,7 +85,10 @@
     <string name="project_open_file">Preview saved file</string>
     <string name="project_file_empty">The file has no readable text.</string>
     <string name="project_file_add_failed">A file could not be added. Check that the project still exists and has room.</string>
-    <string name="project_import_added">Added %1$d files.</string>
+    <plurals name="project_import_added">
+        <item quantity="one">Added %1$d file.</item>
+        <item quantity="other">Added %1$d files.</item>
+    </plurals>
     <string name="project_import_failed_count">%1$d could not be added. %2$s</string>
     <string name="project_import_full_count">%1$d not imported because the project is full.</string>
     <string name="project_import_unprocessed_count">%1$d not processed. Select them again in a smaller batch.</string>
@@ -118,4 +114,11 @@
     <string name="reply_code_save_failed">Could not save the file</string>
     <string name="reply_table_copy">Copy table</string>
     <string name="reply_csv_copy">Copy CSV</string>
+    <string name="switcher_favorites">Favorites</string>
+    <string name="switcher_manage">Add or manage providers</string>
+    <string name="switcher_in_use">In use</string>
+    <plurals name="switcher_model_count">
+        <item quantity="one">%1$d model</item>
+        <item quantity="other">%1$d models</item>
+    </plurals>
 </resources>

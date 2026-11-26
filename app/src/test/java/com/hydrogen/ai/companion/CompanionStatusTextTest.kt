@@ -99,7 +99,7 @@ class CompanionStatusTextTest {
         val lines = CompanionStatusText.technicalLines(session, health("paired"))
         val all = lines.joinToString("\n")
         assertTrue(all.contains("hydrogen-windows-work-companion v0.3.0 (paired)"))
-        assertTrue(all.contains("Shared folders: 1 · PC work: on · Paired phones: 1"))
+        assertTrue(all.contains("Shared folders: 1, PC work: on, Paired phones: 1"))
         assertTrue(all.contains("Offers: pairing, encryption, approvals, folder allowlist"))
         assertTrue(all.contains("Turned off: remote file read, remote commands, task management"))
         assertTrue(all.contains("dev-123") && all.contains("key-9") && all.contains("http://10.0.2.2:18812"))
@@ -130,5 +130,16 @@ class CompanionStatusTextTest {
         assertEquals("Running on your PC (100%)", CompanionStatusText.taskLine("RUNNING", 250))
         assertEquals("Done", CompanionStatusText.taskLine("COMPLETED", 100))
         assertEquals("Paused", CompanionStatusText.taskLine("PAUSED", 0))
+    }
+
+    @Test
+    fun unreachableExplainsWhatToDoWithoutRawErrors() {
+        val usb = CompanionStatusText.unreachable(loopback = true)
+        val lan = CompanionStatusText.unreachable(loopback = false)
+        listOf(usb, lan).forEach {
+            org.junit.Assert.assertTrue(it, it.startsWith("Can't reach your PC."))
+            org.junit.Assert.assertFalse(it, it.contains("127.0.0.1") || it.contains("Failed"))
+        }
+        org.junit.Assert.assertTrue(usb.contains("Wi-Fi mode"))
     }
 }

@@ -111,7 +111,7 @@ fun AboutSheet(
             Spacer(Modifier.height(22.dp))
 
             AboutCard {
-                val icons = listOf(Icons.Outlined.Smartphone, Icons.Outlined.VisibilityOff, Icons.Outlined.Lock)
+                val icons = listOf(com.hydrogen.ai.ui.OrbitIcons.Phone, com.hydrogen.ai.ui.OrbitIcons.EyeOff, com.hydrogen.ai.ui.OrbitIcons.Lock)
                 AboutOrbit.PROMISES.forEachIndexed { index, line ->
                     Row(
                         modifier = Modifier
@@ -120,7 +120,7 @@ fun AboutSheet(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
-                            icons.getOrElse(index) { Icons.Outlined.Lock },
+                            icons.getOrElse(index) { com.hydrogen.ai.ui.OrbitIcons.Lock },
                             contentDescription = null,
                             tint = orbit.accent,
                             modifier = Modifier.size(20.dp)
@@ -133,11 +133,11 @@ fun AboutSheet(
             Spacer(Modifier.height(12.dp))
 
             AboutCard {
-                AboutLinkRow(Icons.Outlined.AutoAwesome, AboutOrbit.WHATS_NEW, onWhatsNew)
+                AboutLinkRow(com.hydrogen.ai.ui.OrbitIcons.Sparkle, AboutOrbit.WHATS_NEW, onWhatsNew)
                 HorizontalDivider(color = orbit.line, modifier = Modifier.padding(start = 50.dp))
-                AboutLinkRow(Icons.Outlined.PrivacyTip, AboutOrbit.PRIVACY, onPrivacy)
+                AboutLinkRow(com.hydrogen.ai.ui.OrbitIcons.Shield, AboutOrbit.PRIVACY, onPrivacy)
                 HorizontalDivider(color = orbit.line, modifier = Modifier.padding(start = 50.dp))
-                AboutLinkRow(Icons.Outlined.Description, AboutOrbit.LICENSES, onLicenses)
+                AboutLinkRow(com.hydrogen.ai.ui.OrbitIcons.File, AboutOrbit.LICENSES, onLicenses)
             }
             Spacer(Modifier.height(20.dp))
 
@@ -167,10 +167,13 @@ fun AboutSheet(
 fun LicensesSheet(onDismiss: () -> Unit, onBack: () -> Unit) {
     val orbit = OrbitTheme.colors
     val context = LocalContext.current
-    val licenseText = remember {
-        runCatching {
-            context.resources.openRawResource(R.raw.apache_license_2_0).bufferedReader().use { it.readText() }
-        }.map(AboutOrbit::reflow).getOrDefault(emptyList())
+    // Read off the main thread: the full license text is a raw resource.
+    val licenseText by androidx.compose.runtime.produceState(initialValue = emptyList<String>()) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                context.resources.openRawResource(R.raw.apache_license_2_0).bufferedReader().use { it.readText() }
+            }.map(AboutOrbit::reflow).getOrDefault(emptyList())
+        }
     }
     var showLicense by rememberSaveable { mutableStateOf(false) }
 
@@ -188,7 +191,7 @@ fun LicensesSheet(onDismiss: () -> Unit, onBack: () -> Unit) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack, modifier = Modifier.padding(end = 4.dp)) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "${AboutOrbit.BACK} to About Orbit")
+                    Icon(com.hydrogen.ai.ui.OrbitIcons.ArrowBack, contentDescription = "${AboutOrbit.BACK} to About Orbit")
                 }
                 Text(
                     AboutOrbit.LICENSES,
@@ -215,7 +218,7 @@ fun LicensesSheet(onDismiss: () -> Unit, onBack: () -> Unit) {
                     ) {
                         Text(library.name, style = MaterialTheme.typography.titleSmall, color = orbit.text)
                         Text(
-                            "${library.by} · ${library.license}",
+                            "${library.by}, ${library.license}",
                             style = MaterialTheme.typography.bodySmall,
                             color = orbit.muted
                         )
@@ -242,7 +245,7 @@ fun LicensesSheet(onDismiss: () -> Unit, onBack: () -> Unit) {
                             modifier = Modifier.weight(1f)
                         )
                         Icon(
-                            if (showLicense) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                            if (showLicense) com.hydrogen.ai.ui.OrbitIcons.ChevronUp else com.hydrogen.ai.ui.OrbitIcons.ChevronDown,
                             contentDescription = null,
                             tint = orbit.muted
                         )
@@ -315,6 +318,6 @@ private fun AboutLinkRow(icon: ImageVector, label: String, onClick: () -> Unit) 
         Icon(icon, contentDescription = null, tint = orbit.muted, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(14.dp))
         Text(label, style = MaterialTheme.typography.bodyLarge, color = orbit.text, modifier = Modifier.weight(1f))
-        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = orbit.faint)
+        Icon(com.hydrogen.ai.ui.OrbitIcons.ChevronRight, contentDescription = null, tint = orbit.faint)
     }
 }

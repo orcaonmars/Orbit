@@ -61,7 +61,7 @@ fun WhatsNewSheet(onDismiss: () -> Unit) {
                 WhatsNew.ITEMS.forEach { item -> WhatsNewRow(item) }
             }
             Spacer(Modifier.height(24.dp))
-            Button(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+            Button(shape = com.hydrogen.ai.ui.OrbitButtonShape, onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
                 Text(WhatsNew.DONE)
             }
         }

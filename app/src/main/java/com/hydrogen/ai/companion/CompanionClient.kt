@@ -505,7 +505,7 @@ class HttpCompanionClient(
         } catch (e: Exception) {
             return CompanionResult.Failure(
                 code = "network_error",
-                userMessage = e.message ?: "Unable to reach Windows companion."
+                userMessage = CompanionStatusText.unreachable(CompanionUrlSafety.isLoopback(urlString))
             )
         }
 

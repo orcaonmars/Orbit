@@ -248,7 +248,7 @@ object CompanionCrypto {
             val tz = z2; z2 = z3; z3 = tz
         }
 
-        val z2Inv = z2.modPow(P.subtract(BigInteger.TWO), P)
+        val z2Inv = z2.modPow(P.subtract(BigInteger.valueOf(2)), P) // BigInteger.TWO is API 33+
         val shared = x2.multiply(z2Inv).mod(P)
         return encodeLittleEndian32(shared)
     }

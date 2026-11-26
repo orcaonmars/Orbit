@@ -11,6 +11,17 @@ object CompanionStatusText {
     fun headline(paired: Boolean): String = if (paired) "Paired with your PC" else "Not paired yet"
 
     /**
+     * Shown when the PC can't be reached at all, instead of the raw socket error. A loopback address only reaches the
+     * PC from the emulator or over USB (adb reverse), so a phone gets pointed at Wi-Fi mode.
+     */
+    fun unreachable(loopback: Boolean): String = if (loopback) {
+        "Can't reach your PC. This address only works over USB. To connect over Wi-Fi, turn on Wi-Fi mode in the " +
+            "PC Companion and tap Change address."
+    } else {
+        "Can't reach your PC. Check that the PC Companion is running and the address is right, then tap Check connection."
+    }
+
+    /**
      * Short sentences about the connection. Empty before the first check of an unpaired phone, and when the PC
      * no longer knows a paired phone (the error message explains that case).
      */
@@ -79,8 +90,8 @@ object CompanionStatusText {
         if (health != null) {
             add("Service: ${health.service} v${health.version} (${health.status})")
             add(
-                "Shared folders: ${health.allowlistRootCount} · PC work: ${if (health.workEnabled) "on" else "off"}" +
-                    " · Paired phones: ${health.pairedDeviceCount}"
+                "Shared folders: ${health.allowlistRootCount}, PC work: ${if (health.workEnabled) "on" else "off"}" +
+                    ", Paired phones: ${health.pairedDeviceCount}"
             )
             val caps = health.capabilities
             val features = listOf(
@@ -97,7 +108,7 @@ object CompanionStatusText {
         }
         if (session != null) {
             add("This phone: ${session.deviceName} (${session.deviceId})")
-            add("Key ID: ${session.keyId} · ${session.encryptedTransport}")
+            add("Key ID: ${session.keyId}, ${session.encryptedTransport}")
             add("Address: ${session.baseUrl}")
         }
     }

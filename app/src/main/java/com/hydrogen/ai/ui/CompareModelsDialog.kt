@@ -57,7 +57,7 @@ fun CompareModelsDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Outlined.Compare, contentDescription = null) },
+        icon = { Icon(com.hydrogen.ai.ui.OrbitIcons.Compare, contentDescription = null) },
         title = { Text("Ask another model") },
         text = {
             Column(
