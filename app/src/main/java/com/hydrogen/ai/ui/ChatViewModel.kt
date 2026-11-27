@@ -18,6 +18,7 @@ import com.hydrogen.ai.companion.WorkActionType
 import com.hydrogen.ai.BuildConfig
 import com.hydrogen.ai.data.AppVersionStore
 import com.hydrogen.ai.data.CompositeRelayCredentialStore
+import com.hydrogen.ai.data.CredentialBinding
 import com.hydrogen.ai.data.ConversationStore
 import com.hydrogen.ai.data.ErrorLogStore
 import com.hydrogen.ai.data.InMemoryAppVersionStore
@@ -105,6 +106,7 @@ internal val KEY_RELAY_CATEGORIES = setOf(
     ProviderErrorCategory.QUOTA_DAILY_429,
     ProviderErrorCategory.QUOTA_RATE_TPM_RPM_429,
     ProviderErrorCategory.OUT_OF_CREDITS,
+    ProviderErrorCategory.BILLING_NOT_VERIFIED,
     ProviderErrorCategory.UNAUTHORIZED_UPSTREAM_401,
     ProviderErrorCategory.UNAUTHORIZED_RELAY_401
 )
@@ -1177,6 +1179,18 @@ class ChatViewModel(
                 readiness = buildBaselineReadiness(config, false, computeWorkMode(it.companion))
             )
         }
+    }
+
+    /**
+     * Removes the key and backup keys saved for one service the owner deleted from the model menu. Keys for every
+     * other service stay. The active service is never touched here; the menu switches away from it first.
+     */
+    fun deleteProviderCredential(route: ProviderRoute, url: String) {
+        val target = providerDraft(route, url)
+        val binding = CredentialBinding.forConfig(target) ?: return
+        if (binding == CredentialBinding.forConfig(_uiState.value.relayConfig)) return
+        credentialStore.setToken(target, null)
+        credentialStore.setBackupTokens(target, emptyList())
     }
 
     /** Discovery never changes the active chat connection or saves the pasted key. */

@@ -206,6 +206,7 @@ enum class ProviderErrorCategory(val title: String) {
     CANCELLED("Stopped"),
     UNKNOWN_PROTOCOL("Unexpected reply"),
     OUT_OF_CREDITS("Out of credits"),
+    BILLING_NOT_VERIFIED("Billing not verified"),
     MODEL_NOT_FOUND("Model not found"),
     CONTEXT_TOO_LONG("Chat too long for this model"),
     REQUEST_TOO_LARGE("Message too large"),

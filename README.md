@@ -9,6 +9,13 @@ pick a model, and talk. That's most of it.
 It's an alpha. The core stuff is solid and well tested, but it hasn't been on many phones yet, so expect a few rough
 edges.
 
+## What is new in 0.3.4-alpha
+
+- Delete any saved model from its menu, including the one in use; Orbit switches to another saved model first.
+- Delete a whole provider, with its saved models and saved key, from its menu or the header of its page.
+- The provider in use is listed first, and favorites sit at the top of each provider.
+- A service that blocks requests until billing is verified now says so, instead of showing out of credits.
+
 ## What is new in 0.3.3-alpha
 
 - Each service's own photo limit per message; photos past it go into numbered grid images instead of being dropped.

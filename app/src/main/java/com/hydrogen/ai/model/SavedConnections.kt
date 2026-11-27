@@ -83,6 +83,34 @@ object SavedConnections {
     fun remove(list: List<SavedConnection>, connection: SavedConnection): List<SavedConnection> =
         list.filterNot { it.sameTarget(connection) }
 
+    /** Same service and endpoint, whatever the model. This is also the scope a saved key is bound to. */
+    fun sameServer(a: SavedConnection, b: SavedConnection): Boolean =
+        a.route == b.route && (a.route == ProviderRoute.GOOGLE_AI_STUDIO_DIRECT ||
+            ProviderPresets.normalizeBaseUrl(a.baseUrl).lowercase() ==
+            ProviderPresets.normalizeBaseUrl(b.baseUrl).lowercase())
+
+    /** Every saved model on [server]'s service and endpoint is dropped. */
+    fun removeServer(list: List<SavedConnection>, server: SavedConnection): List<SavedConnection> =
+        list.filterNot { sameServer(it, server) }
+
+    /**
+     * What to switch to when [removing] includes the model in use: a favorite on the same service first, then the
+     * most recent model on the same service, then any favorite, then the most recent model anywhere. Null when
+     * nothing would be left to switch to.
+     */
+    fun replacementFor(list: List<SavedConnection>, removing: List<SavedConnection>): SavedConnection? {
+        val gone = removing.map { it.key }.toSet()
+        val left = list.filterNot { it.key in gone }
+        val anchor = removing.firstOrNull()
+        val sameService = if (anchor == null) emptyList() else left.filter { sameServer(it, anchor) }
+        return sameService.firstOrNull { it.pinned } ?: sameService.firstOrNull()
+            ?: left.firstOrNull { it.pinned } ?: left.firstOrNull()
+    }
+
+    /** Favorites first, then the rest, each keeping most recent first. */
+    fun favoritesFirst(list: List<SavedConnection>): List<SavedConnection> =
+        list.filter { it.pinned } + list.filterNot { it.pinned }
+
     /** True when [connection] is what [config] already points at. */
     fun isCurrent(connection: SavedConnection, config: RelayConfig): Boolean {
         val current = from(config, hasKey = false, nowEpochMs = 0L) ?: return false

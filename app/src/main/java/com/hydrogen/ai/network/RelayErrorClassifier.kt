@@ -30,6 +30,7 @@ object RelayErrorClassifier {
     const val LAYER_UPSTREAM_SHARED = "upstream_shared_limit"
     const val LAYER_PLAN = "provider_plan"
     const val LAYER_KEY = "provider"
+    const val LAYER_UPSTREAM_PROVIDER = "upstream_provider"
 
     /** Returns true if the error is transient and a retry is likely to succeed. */
     fun isTransientError(category: ProviderErrorCategory): Boolean = when (category) {
@@ -47,6 +48,7 @@ object RelayErrorClassifier {
         ProviderErrorCategory.REQUEST_TOO_LARGE -> false
         ProviderErrorCategory.UNKNOWN_PROTOCOL -> false
         ProviderErrorCategory.OUT_OF_CREDITS -> false
+        ProviderErrorCategory.BILLING_NOT_VERIFIED -> false
         ProviderErrorCategory.REGION_UNAVAILABLE -> false
         else -> false
     }
@@ -84,12 +86,13 @@ object RelayErrorClassifier {
     internal fun statusForErrorType(type: String?): Int? = when (type?.lowercase()) {
         "invalid_request_error", "invalid_argument", "context_length_exceeded" -> 400
         "authentication_error", "invalid_api_key", "unauthenticated" -> 401
-        "billing_error", "insufficient_quota", "insufficient_credits" -> 402
-        "permission_error", "permission_denied" -> 403
+        "billing_error", "insufficient_quota", "insufficient_credits", "insufficient_funds" -> 402
+        "permission_error", "permission_denied", "insufficient_scope" -> 403
         "not_found_error", "model_not_found", "not_found" -> 404
         "request_too_large" -> 413
         "rate_limit_error", "rate_limit_exceeded", "resource_exhausted" -> 429
         "api_error", "internal" -> 500
+        "provider_error" -> 502
         "unavailable" -> 503
         "overloaded_error" -> 529
         else -> null
@@ -130,6 +133,32 @@ object RelayErrorClassifier {
                 ProviderErrorCategory.CONTENT_FILTERED,
                 "The AI service's safety filter blocked this reply. Try rewording your message.",
                 "provider_policy"
+            )
+        }
+
+        // Clean APIs answers 402 "Billing verification failed. Please check your payment method." for an account
+        // whose payment check failed, even with the free monthly allowance untouched. Nothing was used up.
+        if (looksBillingNotVerified(statusCode, bodyLower)) {
+            return error(
+                ProviderErrorCategory.BILLING_NOT_VERIFIED,
+                "${svc ?: "This service"} couldn't verify the billing or payment method on your account, so it " +
+                    "turned this request away before it reached a model. This is not used-up usage, and free " +
+                    "allowance can't be used until the check passes. Check the payment method on the " +
+                    "${svc ?: "service"} website." + quotedServerText(responseBody, svc),
+                LAYER_BILLING
+            )
+        }
+
+        // Clean APIs: 402 insufficient_funds means the monthly allowance and the balance are both used up. A zero
+        // balance alone is not that, because the allowance is spent first.
+        if (statusCode == 402 && bodyLower.contains("insufficient_funds")) {
+            return error(
+                ProviderErrorCategory.OUT_OF_CREDITS,
+                "${svc ?: "The service"} reports that your plan allowance and your balance are both used up. A " +
+                    "zero balance alone doesn't cause this while allowance is left. Check usage on the " +
+                    "${svc ?: "service"} dashboard, wait for the allowance to reset, or add balance there. Orbit " +
+                    "never pays for anything." + quotedServerText(responseBody, svc),
+                LAYER_BILLING
             )
         }
 
@@ -284,7 +313,14 @@ object RelayErrorClassifier {
                 }
             }
 
-            403 -> if (keyWords) {
+            403 -> if (bodyLower.contains("insufficient_scope") || bodyLower.contains("missing_scope")) {
+                error(
+                    ProviderErrorCategory.FORBIDDEN_403,
+                    "Your ${svc ?: "service"} key doesn't have permission to chat. Make a key with the inference " +
+                        "scope on the ${svc ?: "service"} website and paste it in Models and providers.",
+                    LAYER_KEY
+                )
+            } else if (keyWords) {
                 error(ProviderErrorCategory.UNAUTHORIZED_UPSTREAM_401, keyMessage, keyLayer)
             } else {
                 error(
@@ -297,7 +333,15 @@ object RelayErrorClassifier {
 
             429 -> classify429(statusCode, detail, bodyLower, retryAfterSeconds, svc)
 
-            in 500..599 -> error(
+            in 500..599 -> if (bodyLower.contains("provider_error")) {
+                error(
+                    ProviderErrorCategory.SERVER_5XX,
+                    "The model provider behind ${svc ?: "this service"} failed on this request. That is not your " +
+                        "key or your allowance. Try again in a moment, or pick another model.",
+                    LAYER_UPSTREAM_PROVIDER,
+                    retryAfterSeconds
+                )
+            } else error(
                 ProviderErrorCategory.SERVER_5XX,
                 "${svc ?: "The AI server"} had a temporary problem. Try again in a moment.",
                 "server",
@@ -366,8 +410,22 @@ object RelayErrorClassifier {
                 (body.contains("provider returned error") && body.contains("temporarily rate-limited"))
             )
 
+    private val BILLING_CHECK_WORDS = listOf(
+        "billing verification",
+        "verify your billing",
+        "payment method",
+        "payment verification",
+        "billing not verified"
+    )
+
+    private fun looksBillingNotVerified(status: Int, body: String): Boolean =
+        (status == 402 || status == 403) && BILLING_CHECK_WORDS.any { body.contains(it) }
+
     private fun looksOutOfCredits(status: Int, body: String): Boolean {
         if (status == 402) return true
+        // A 5xx is the service or the provider behind it failing. Billing words quoted from that provider (Clean APIs
+        // "provider_error", an OpenRouter upstream) describe someone else's account, not this key's allowance.
+        if (status in 500..599 || body.contains("provider_error")) return false
         if (body.contains("insufficient_quota") || body.contains("billing_error") ||
             body.contains("credit balance is too low") || body.contains("insufficient balance") ||
             body.contains("insufficient credits") || body.contains("insufficient_credits") ||
@@ -468,6 +526,17 @@ object RelayErrorClassifier {
             ?: return headline
         val provider = (metadata["provider_name"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
         return "$headline (${provider?.let { "$it: " }.orEmpty()}$raw)"
+    }
+
+    /** The server's own error message after the explanation, so the exact reason is never hidden. */
+    private fun quotedServerText(responseBody: String, svc: String?): String {
+        val root = runCatching { json.parseToJsonElement(responseBody.trim()) }.getOrNull() as? JsonObject
+            ?: return ""
+        val text = ((root["error"] as? JsonObject)?.get("message") as? JsonPrimitive)?.contentOrNull
+            ?: (root["message"] as? JsonPrimitive)?.contentOrNull
+            ?: return ""
+        val clean = SecretRedactor.redact(text).trim().take(200)
+        return if (clean.isEmpty()) "" else " ${svc ?: "The service"} says: \"$clean\""
     }
 
     fun parseRetryAfterSeconds(headerValue: String?): Int? {

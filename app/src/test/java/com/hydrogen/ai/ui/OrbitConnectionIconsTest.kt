@@ -8,7 +8,7 @@ import org.junit.Test
 
 /**
  * Source guard for the connection switcher icon migration. The sheet is the first mixed-family screen moved to the
- * original Orbit outline set: cloud/computer server labels, key, rename, forget, in-use check and manage connections.
+ * original Orbit outline set: cloud/computer server labels, key, rename, delete, in-use check and manage connections.
  */
 class OrbitConnectionIconsTest {
     private fun source(name: String): String =
@@ -36,7 +36,7 @@ class OrbitConnectionIconsTest {
     @Test
     fun connectionSwitcherUsesOnlyOrbitIcons() {
         val sheet = source("ConnectionSwitcherSheet.kt")
-        listOf("Check", "Close", "Cloud", "Computer", "Key", "Edit", "Tune").forEach { icon ->
+        listOf("Check", "Delete", "Cloud", "Computer", "Key", "Edit", "Tune").forEach { icon ->
             assertTrue("Missing OrbitIcons.$icon usage", sheet.contains("OrbitIcons.$icon"))
         }
         assertFalse("ConnectionSwitcherSheet must not import Material icons",
@@ -93,18 +93,21 @@ class OrbitConnectionIconsTest {
     fun connectionSwitcherKeepsActionsAndContentDescriptions() {
         val sheet = source("ConnectionSwitcherSheet.kt")
         assertTrue(sheet.contains("onSwitch(connection)"))
-        assertTrue(sheet.contains("onRemove(connection)"))
+        assertTrue(sheet.contains("onRemove = { deletingModel = connection }"))
+        assertTrue(sheet.contains("onRemove(target, replacement)"))
+        assertTrue(sheet.contains("onRemoveProvider(models, replacement)"))
         // Row actions live in one overflow menu per row (two-level switcher redesign).
         assertTrue(sheet.contains("OrbitIcons.MoreHorizontal"))
         assertTrue(sheet.contains("onClick = { menuOpen = false; onRename() }"))
-        assertTrue(sheet.contains("onClick = { menuOpen = false; onRemove() }"))
+        assertTrue(sheet.contains("DeleteMenuItem(\"Delete\", \"Delete \$name\") { menuOpen = false; onRemove() }"))
+        assertTrue(sheet.contains("DeleteMenuItem(\"Delete provider\", \"Delete \$name\") { open = false; onDelete() }"))
         assertTrue(sheet.contains("onClick = { menuOpen = false; onPin() }"))
         assertTrue(sheet.contains("OrbitIcons.ArrowBack"))
         assertTrue(sheet.contains("onOpenSettings"))
         assertTrue(sheet.contains("onDismiss()"))
         assertTrue(sheet.contains("contentDescription = \"In use\""))
         assertTrue(sheet.contains("contentDescription = \"Rename \$name\""))
-        assertTrue(sheet.contains("contentDescription = \"Forget \$name\""))
+        assertTrue(sheet.contains("contentDescription = description"))
         assertTrue(sheet.contains("contentDescription = \"Uses a key\""))
         assertTrue(sheet.contains("contentDescription = if (local) \"On your network\" else \"Remote server\""))
         assertTrue(sheet.contains("role = Role.RadioButton"))

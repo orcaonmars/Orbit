@@ -1130,38 +1130,56 @@ fun ChatScreen(
         )
     }
 
+    /** Points the chat at a saved model; the key bound to that exact service is loaded by the view model. */
+    fun switchToSaved(target: SavedConnection) {
+        val cfg = viewModel.uiState.value.relayConfig
+        // token = null: the ViewModel loads the key bound to this exact service/endpoint.
+        viewModel.saveRelaySettings(
+            target.route,
+            target.baseUrl,
+            target.modelId,
+            null,
+            cfg.maxContextTokensBudget,
+            cfg.maxImagesPerRequest,
+            cfg.streamingEnabled,
+            cfg.rememberTokenInKeystore,
+            if (target.route == ProviderRoute.GOOGLE_AI_STUDIO_DIRECT) target.webSearchEnabled else cfg.webSearchEnabled,
+            reasoningMode = target.reasoningMode
+        )
+        if (target.needsKey && !viewModel.uiState.value.hasToken) {
+            settingsPreset = null
+            showSettings = true
+            Toast.makeText(context, "Enter the API key for this server.", Toast.LENGTH_LONG).show()
+        }
+    }
+
     if (showSwitcher) {
         ConnectionSwitcherSheet(
             current = state.relayConfig,
             connections = savedConnections,
-            onSwitch = { target ->
-                val cfg = viewModel.uiState.value.relayConfig
-                // token = null: the ViewModel loads the key bound to this exact service/endpoint.
-                viewModel.saveRelaySettings(
-                    target.route,
-                    target.baseUrl,
-                    target.modelId,
-                    null,
-                    cfg.maxContextTokensBudget,
-                    cfg.maxImagesPerRequest,
-                    cfg.streamingEnabled,
-                    cfg.rememberTokenInKeystore,
-                    if (target.route == ProviderRoute.GOOGLE_AI_STUDIO_DIRECT) target.webSearchEnabled else cfg.webSearchEnabled,
-                    reasoningMode = target.reasoningMode
-                )
-                if (target.needsKey && !viewModel.uiState.value.hasToken) {
-                    settingsPreset = null
-                    showSettings = true
-                    Toast.makeText(context, "Enter the API key for this server.", Toast.LENGTH_LONG).show()
-                }
-            },
-            onRemove = { target ->
+            onSwitch = { target -> switchToSaved(target) },
+            onRemove = { target, replacement ->
+                // Switch away first, so the list never loses the model that is in use.
+                if (replacement != null) switchToSaved(replacement)
                 scope.launch {
                     val updated = withContext(Dispatchers.IO) {
                         runCatching { connectionStore.update { SavedConnections.remove(it, target) } }.getOrNull()
                     }
                     if (updated != null) savedConnections = updated
                 }
+            },
+            onRemoveProvider = { models, replacement ->
+                val server = models.firstOrNull() ?: return@ConnectionSwitcherSheet
+                if (replacement != null) switchToSaved(replacement)
+                // The view model refuses to clear the key of the service in use, so this only runs after the switch.
+                viewModel.deleteProviderCredential(server.route, server.baseUrl)
+                scope.launch {
+                    val updated = withContext(Dispatchers.IO) {
+                        runCatching { connectionStore.update { SavedConnections.removeServer(it, server) } }.getOrNull()
+                    }
+                    if (updated != null) savedConnections = updated
+                }
+                Toast.makeText(context, "Provider deleted.", Toast.LENGTH_SHORT).show()
             },
             onPin = { target ->
                 scope.launch {
@@ -3728,6 +3746,7 @@ private fun MessageStatusContent(
                             err.category == ProviderErrorCategory.UNAUTHORIZED_RELAY_401 ||
                             err.category == ProviderErrorCategory.UNAUTHORIZED_UPSTREAM_401 ||
                             err.category == ProviderErrorCategory.OUT_OF_CREDITS ||
+                            err.category == ProviderErrorCategory.BILLING_NOT_VERIFIED ||
                             err.category == ProviderErrorCategory.MODEL_NOT_FOUND ||
                             err.category == ProviderErrorCategory.REGION_UNAVAILABLE ||
                             err.sourceLayer == "local_model"

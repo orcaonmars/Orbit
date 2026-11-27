@@ -85,6 +85,12 @@ object ErrorExplainer {
                 "Or pick a service with a free tier, or a model on your PC.",
                 "Orbit never pays for anything and never switches services by itself."
             )
+            ProviderErrorCategory.BILLING_NOT_VERIFIED -> listOf(
+                "Open $site and check the payment method or account verification on its billing page.",
+                "A free allowance can't be used until that check passes, and Orbit can't fix it from this phone.",
+                "If the account looks fine there, contact $svc support and include the text under Details.",
+                "Orbit never pays for anything and never switches services by itself."
+            )
             ProviderErrorCategory.MODEL_NOT_FOUND -> if (ownServer) {
                 listOf(
                     "Make sure the model is downloaded and loaded in LM Studio or Ollama.",

@@ -9,15 +9,15 @@ package com.hydrogen.ai.model
 object WhatsNew {
     data class Item(val title: String, val body: String)
 
-    const val TITLE = "What's new in Orbit 0.3.3"
+    const val TITLE = "What's new in Orbit 0.3.4"
     const val SUBTITLE = "Your chats, notes and settings came with you."
     const val DONE = "Start chatting"
 
     val ITEMS: List<Item> = listOf(
-        Item("More photos per message", "Photos past a service's limit go into numbered grids instead of being left out."),
-        Item("Lighter photos", "Big camera photos are shrunk before sending instead of being turned away."),
-        Item("Clearer limit messages", "A busy free model no longer looks like every one of your keys ran out."),
-        Item("Fixes", "A missing photo from earlier in a chat no longer stops new messages from sending.")
+        Item("Delete a model", "Every saved model has Delete in its menu, including the one you are using."),
+        Item("Delete a provider", "Remove a whole provider, its saved models and its saved key, from its menu or page."),
+        Item("Tidier model list", "The provider you are using comes first, and favorites sit at the top of each provider."),
+        Item("Clearer billing message", "When a service blocks requests until billing is verified, Orbit now says so instead of out of credits.")
     )
 
     /**
