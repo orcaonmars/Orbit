@@ -188,7 +188,11 @@ class SharedPrefsRelayConfigStore(context: Context) : RelayConfigStore {
             reasoningMode = com.hydrogen.ai.model.ReasoningMode.fromStored(runCatching { prefs.getString("reasoning_mode", null) }.getOrNull()),
             openRouterReasoningModels = if (com.hydrogen.ai.model.ReasoningPolicy.isOpenRouter(baseUrl))
                 runCatching { prefs.getStringSet("openrouter_reasoning_models", emptySet())?.toSet().orEmpty() }.getOrDefault(emptySet())
-                else emptySet()
+                else emptySet(),
+            // Missing from configs saved before 0.3.5: those were all Chat Completions.
+            openAiProtocol = com.hydrogen.ai.model.OpenAiProtocol.fromStored(
+                runCatching { prefs.getString(KEY_OPENAI_PROTOCOL, null) }.getOrNull()
+            )
         )
     }
 
@@ -204,6 +208,7 @@ class SharedPrefsRelayConfigStore(context: Context) : RelayConfigStore {
             .putBoolean(KEY_WEB_SEARCH, config.webSearchEnabled)
             .putString("reasoning_mode", config.reasoningMode.name)
             .putStringSet("openrouter_reasoning_models", config.openRouterReasoningModels.take(2000).toSet())
+            .putString(KEY_OPENAI_PROTOCOL, config.openAiProtocol.name)
             .apply()
     }
 
@@ -218,6 +223,7 @@ class SharedPrefsRelayConfigStore(context: Context) : RelayConfigStore {
         private const val KEY_WEB_SEARCH = "web_search_enabled"
         private const val KEY_STREAMING_ENABLED ="streaming_enabled"
         private const val KEY_REMEMBER_TOKEN = "remember_token_keystore"
+        private const val KEY_OPENAI_PROTOCOL = "openai_protocol"
     }
 }
 

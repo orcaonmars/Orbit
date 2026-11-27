@@ -1071,7 +1071,9 @@ class ChatViewModel(
         /** Null keeps the saved backup keys; a list replaces them. */
         backupTokens: List<String>? = null,
         reasoningMode: com.hydrogen.ai.model.ReasoningMode = _uiState.value.relayConfig.reasoningMode,
-        discoveredReasoningModels: Set<String>? = null
+        discoveredReasoningModels: Set<String>? = null,
+        /** Only the OpenAI-compatible route uses it; other routes always store Chat Completions. */
+        openAiProtocol: com.hydrogen.ai.model.OpenAiProtocol = _uiState.value.relayConfig.openAiProtocol
     ) {
         val defaultModel = when (route) {
             ProviderRoute.GEMINI_HYDROGEN_RELAY -> HydrogenDefaults.PRIMARY_MODEL_ID
@@ -1095,9 +1097,14 @@ class ChatViewModel(
             streamingEnabled = streamingEnabled,
             rememberTokenInKeystore = rememberTokenInKeystore,
             webSearchEnabled = webSearchEnabled,
-            reasoningMode = reasoningMode
+            reasoningMode = reasoningMode,
+            openAiProtocol = if (route == ProviderRoute.GEMINI_HYDROGEN_RELAY) {
+                openAiProtocol
+            } else {
+                com.hydrogen.ai.model.OpenAiProtocol.CHAT_COMPLETIONS
+            }
         )
-        val scoped = if (draft.route == previous.route && draft.effectiveBaseUrl == previous.effectiveBaseUrl) draft
+        val scoped =if (draft.route == previous.route && draft.effectiveBaseUrl == previous.effectiveBaseUrl) draft
             else draft.copy(openRouterReasoningModels = emptySet())
         val cleaned = normalizeReasoning(
             if (discoveredReasoningModels != null && com.hydrogen.ai.model.ReasoningPolicy.isOpenRouter(scoped.effectiveBaseUrl))

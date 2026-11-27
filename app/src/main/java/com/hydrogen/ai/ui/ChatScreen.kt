@@ -1243,9 +1243,9 @@ fun ChatScreen(
             readiness = state.readiness,
             isCheckingHealth = state.isCheckingHealth,
             onDismiss = { showSettings = false; browseProvidersOnOpen = false },
-            onSave = { route, url, model, token, contextTokens, images, streaming, remember, search, effort, catalog ->
+            onSave = { route, url, model, token, contextTokens, images, streaming, remember, search, effort, catalog, protocol ->
                 viewModel.saveRelaySettings(route, url, model, token, contextTokens, images, streaming, remember, search,
-                    reasoningMode = effort, discoveredReasoningModels = catalog)
+                    reasoningMode = effort, discoveredReasoningModels = catalog, openAiProtocol = protocol)
             },
             onCheckHealth = viewModel::checkRelayHealth,
             onDeleteCredential = viewModel::deleteActiveProviderCredential,

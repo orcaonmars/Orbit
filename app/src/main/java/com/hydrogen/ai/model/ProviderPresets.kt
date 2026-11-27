@@ -398,13 +398,13 @@ object ProviderPresets {
     }
 
     /**
-     * The relay client appends "/v1/chat/completions" itself, so a pasted ".../v1" base (the form most
-     * OpenAI-compatible providers document) is trimmed to avoid "/v1/v1". Google's URL is never touched.
+     * The relay client appends "/v1/chat/completions" (or "/v1/responses") itself, so a pasted ".../v1" base (the form
+     * most OpenAI-compatible providers document) is trimmed to avoid "/v1/v1". Google's URL is never touched.
      */
     fun normalizeBaseUrl(raw: String): String {
         var url = raw.trim().trimEnd('/')
-        // A full endpoint copied from the service's docs (".../v1/chat/completions") works as its base.
-        for (endpoint in listOf("/chat/completions", "/completions", "/messages", "/models")) {
+        // A full endpoint copied from the service's docs (".../v1/chat/completions", ".../v1/responses") works as its base.
+        for (endpoint in listOf("/chat/completions", "/responses", "/completions", "/messages", "/models")) {
             if (url.lowercase().endsWith(endpoint)) {
                 url = url.dropLast(endpoint.length).trimEnd('/')
                 break

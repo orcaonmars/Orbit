@@ -25,6 +25,21 @@ enum class ProviderRoute(val displayName: String) {
     ANTHROPIC_MESSAGES("Anthropic Messages API")
 }
 
+/**
+ * Which OpenAI-style endpoint an OpenAI-compatible server is called on. Chat Completions (POST /v1/chat/completions)
+ * is the default and what every saved config before 0.3.5 used. Responses (POST /v1/responses) is opt-in per server.
+ * Model discovery (GET /v1/models) is the same for both.
+ */
+@Serializable
+enum class OpenAiProtocol(val label: String) {
+    CHAT_COMPLETIONS("Chat Completions"),
+    RESPONSES("Responses API");
+
+    companion object {
+        fun fromStored(value: String?): OpenAiProtocol = entries.firstOrNull { it.name == value } ?: CHAT_COMPLETIONS
+    }
+}
+
 @Serializable
 enum class VerificationState(val label: String) {
     UNKNOWN("Untested"),
@@ -73,7 +88,9 @@ data class RelayConfig(
     /** Google AI Studio only: let Gemini search the web (Google Search grounding) and cite its sources. */
     val webSearchEnabled: Boolean = false,
     val reasoningMode: ReasoningMode = ReasoningMode.AUTO,
-    val openRouterReasoningModels: Set<String> = emptySet()
+    val openRouterReasoningModels: Set<String> = emptySet(),
+    /** OpenAI-compatible route only: which endpoint chats are sent to. Ignored by the other routes. */
+    val openAiProtocol: OpenAiProtocol = OpenAiProtocol.CHAT_COMPLETIONS
 ) {
     val effectiveBaseUrl: String
         get() = when (route) {

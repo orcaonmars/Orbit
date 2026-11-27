@@ -19,8 +19,8 @@ android {
         // Framework-only instrumentation avoids downloading test dependencies for offline QA.
         testInstrumentationRunner = "com.hydrogen.ai.CredentialStoreInstrumentation"
         // Bump both together, then rewrite model/WhatsNew.kt so the next update shows its own notes.
-        versionCode = 8
-        versionName = "0.3.4-alpha"
+        versionCode = 9
+        versionName = "0.3.5-alpha"
     }
 
     buildTypes {

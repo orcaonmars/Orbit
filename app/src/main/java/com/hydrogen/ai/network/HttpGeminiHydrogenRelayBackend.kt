@@ -7,6 +7,7 @@ import com.hydrogen.ai.data.ImageLoadResult
 import com.hydrogen.ai.data.ImagePayloadLoader
 import com.hydrogen.ai.model.ChatMessage
 import com.hydrogen.ai.model.MessageRole
+import com.hydrogen.ai.model.OpenAiProtocol
 import com.hydrogen.ai.model.ProviderError
 import com.hydrogen.ai.model.ProviderErrorCategory
 import com.hydrogen.ai.model.ProviderPresets
@@ -156,10 +157,11 @@ class HttpGeminiHydrogenRelayBackend(
         // Gemma up front, and for any other model after it has refused a system message once on this server.
         val foldUpFront = hasSystem &&
             (HttpGoogleAiStudioBackend.isGemmaModel(model) || foldKey in systemRoleRefused)
+        val protocol = config.openAiProtocol
         val first = dispatchOnce(
             baseUrl, token, wifi, model, useStream,
             if (foldUpFront) withInstructionsInFirstUserTurn(effectiveRequest) else effectiveRequest,
-            onStreamDelta
+            onStreamDelta, protocol
         )
         val failure = first.result as? ChatDispatchResult.Failure
         if (foldUpFront || !hasSystem || failure == null || first.streamed ||
@@ -168,7 +170,7 @@ class HttpGeminiHydrogenRelayBackend(
             return@withContext first.result
         }
         systemRoleRefused += foldKey
-        dispatchOnce(baseUrl, token, wifi, model, useStream, withInstructionsInFirstUserTurn(effectiveRequest), onStreamDelta).result
+        dispatchOnce(baseUrl, token, wifi, model, useStream, withInstructionsInFirstUserTurn(effectiveRequest), onStreamDelta, protocol).result
     }
 
     /** Model servers (base URL and model) that refused a system message; later sends fold it into the user turn. */
@@ -184,14 +186,15 @@ class HttpGeminiHydrogenRelayBackend(
         model: String,
         useStream: Boolean,
         request: ChatDispatchRequest,
-        onStreamDelta: suspend (StreamDelta) -> Unit
+        onStreamDelta: suspend (StreamDelta) -> Unit,
+        protocol: OpenAiProtocol
     ): Dispatch {
         var streamed = false
         val tracked: suspend (StreamDelta) -> Unit = { delta ->
             streamed = true
             onStreamDelta(delta)
         }
-        val result = sendOnce(baseUrl, token, wifi, model, useStream, request, tracked)
+        val result = sendOnce(baseUrl, token, wifi, model, useStream, request, tracked, protocol)
         return Dispatch(result, streamed)
     }
 
@@ -202,11 +205,26 @@ class HttpGeminiHydrogenRelayBackend(
         model: String,
         useStream: Boolean,
         request: ChatDispatchRequest,
-        onStreamDelta: suspend (StreamDelta) -> Unit
+        onStreamDelta: suspend (StreamDelta) -> Unit,
+        protocol: OpenAiProtocol
     ): ChatDispatchResult {
+        if (protocol == OpenAiProtocol.RESPONSES && wifi != null) {
+            // Plain-http Wi-Fi model servers are only wired for Chat Completions. Say so rather than send a request they can't serve.
+            return ChatDispatchResult.Failure(
+                ProviderError(
+                    category = ProviderErrorCategory.UNSUPPORTED_CAPABILITY,
+                    userMessage = "The Responses API isn't available for model servers on your Wi-Fi yet. " +
+                        "Switch to Chat Completions in Advanced settings.",
+                    sourceLayer = "client"
+                )
+            )
+        }
         val payloadBuild = buildPayload(model, useStream, request)
         if (payloadBuild.error != null) {
             return ChatDispatchResult.Failure(payloadBuild.error)
+        }
+        if (protocol == OpenAiProtocol.RESPONSES) {
+            return sendResponses(baseUrl, token, model, useStream, request, payloadBuild, onStreamDelta)
         }
         if (wifi != null) {
             return sendChatOverWifi(
@@ -253,6 +271,71 @@ class HttpGeminiHydrogenRelayBackend(
             throw ce
         } catch (e: IOException) {
             ChatDispatchResult.Failure(NetworkErrorClassifier.classify(e, baseUrl, serviceNameOf(baseUrl), forChat = true))
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    /**
+     * One POST to {base}/v1/responses. The same messages and headers as chat; only the body shape and the reply parser
+     * differ. Model discovery (GET /v1/models) never goes through here.
+     */
+    private suspend fun sendResponses(
+        baseUrl: String,
+        token: String,
+        model: String,
+        useStream: Boolean,
+        request: ChatDispatchRequest,
+        payloadBuild: PayloadBuildResult,
+        onStreamDelta: suspend (StreamDelta) -> Unit
+    ): ChatDispatchResult {
+        val chatMessages = payloadBuild.body?.get("messages") as? JsonArray ?: JsonArray(emptyList())
+        val body = OpenAiResponsesProtocol.requestBody(
+            model = model,
+            stream = useStream,
+            input = OpenAiResponsesProtocol.inputItems(chatMessages),
+            maxOutputTokens = request.completionTokenBudget,
+            reasoningEffort = request.reasoningEffort
+        )
+        val service = serviceNameOf(baseUrl)
+        var conn: HttpURLConnection? = null
+        return try {
+            val endpoint = ProviderPresets.openAiEndpoint(ProviderPresets.normalizeBaseUrl(baseUrl), OpenAiResponsesProtocol.PATH)
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = false
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = connectTimeoutMs
+                readTimeout = readTimeoutMs
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                setRequestProperty("Accept", if (useStream) "text/event-stream, application/json" else "application/json")
+                if (token.isNotEmpty()) setRequestProperty("Authorization", "Bearer $token")
+                setRequestProperty("X-Correlation-Id", request.correlationId)
+                setRequestProperty("Idempotency-Key", request.correlationId)
+            }
+            conn = connection
+            connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val text = readStream(connection, true)
+                ChatDispatchResult.Failure(
+                    OpenAiResponsesProtocol.httpError(code, text, connection.getHeaderField("Retry-After"), service)
+                )
+            } else {
+                OpenAiResponsesProtocol.readSuccess(
+                    contentType = connection.contentType,
+                    useStream = useStream,
+                    openBody = { connection.inputStream },
+                    model = model,
+                    usedVision = payloadBuild.usedVision,
+                    serviceName = service,
+                    onStreamDelta = onStreamDelta
+                )
+            }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (e: IOException) {
+            ChatDispatchResult.Failure(NetworkErrorClassifier.classify(e, baseUrl, service, forChat = true))
         } finally {
             conn?.disconnect()
         }

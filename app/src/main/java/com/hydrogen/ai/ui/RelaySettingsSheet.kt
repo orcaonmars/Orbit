@@ -116,7 +116,8 @@ fun RelaySettingsSheet(
         rememberTokenInKeystore: Boolean,
         webSearchEnabled: Boolean,
         reasoningMode: ReasoningMode,
-        discoveredReasoningModels: Set<String>?
+        discoveredReasoningModels: Set<String>?,
+        openAiProtocol: com.hydrogen.ai.model.OpenAiProtocol
     ) -> Unit,
     onCheckHealth: () -> Unit,
     onDeleteCredential: () -> Unit = {},
@@ -161,6 +162,7 @@ fun RelaySettingsSheet(
     var rememberKey by remember(relayConfig) { mutableStateOf(relayConfig.rememberTokenInKeystore || !relayConfig.isConfigured) }
     var webSearch by remember(relayConfig) { mutableStateOf(relayConfig.webSearchEnabled) }
     var reasoningMode by remember(relayConfig) { mutableStateOf(relayConfig.reasoningMode) }
+    var openAiProtocol by remember(relayConfig) { mutableStateOf(relayConfig.openAiProtocol) }
     var openRouterFreeOnly by rememberSaveable { mutableStateOf(savedPreset != ProviderPreset.OPENROUTER || ProviderPresets.isOpenRouterFreeModel(relayConfig.modelId)) }
     var tokenInput by remember { mutableStateOf("") }
     var validationError by remember { mutableStateOf<String?>(null) }
@@ -202,6 +204,7 @@ fun RelaySettingsSheet(
         baseUrl = if (isSaved) relayConfig.baseUrl else next.defaultBaseUrl
         modelId = if (isSaved) relayConfig.modelId else next.defaultModelId
         reasoningMode = if (isSaved) relayConfig.reasoningMode else ReasoningMode.AUTO
+        openAiProtocol = if (isSaved) relayConfig.openAiProtocol else com.hydrogen.ai.model.OpenAiProtocol.CHAT_COMPLETIONS
     }
 
     LaunchedEffect(initialPreset) { initialPreset?.let { choose(it) } }
@@ -252,7 +255,9 @@ fun RelaySettingsSheet(
             webSearch,
             reasoningMode.takeIf { it in reasoningOptions(preset.route, chosenUrl, modelId,
                 modelList.reasoningModelIds ?: relayConfig.openRouterReasoningModels) } ?: ReasoningMode.AUTO,
-            modelList.reasoningModelIds
+            modelList.reasoningModelIds,
+            if (preset.route == ProviderRoute.GEMINI_HYDROGEN_RELAY) openAiProtocol
+            else com.hydrogen.ai.model.OpenAiProtocol.CHAT_COMPLETIONS
         )
         tokenInput = ""
         return true
@@ -650,6 +655,29 @@ fun RelaySettingsSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+            }
+            if (preset.route == ProviderRoute.GEMINI_HYDROGEN_RELAY) {
+                Text("API format", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.hydrogen.ai.model.OpenAiProtocol.entries.forEach { protocol ->
+                        FilterChip(
+                            selected = openAiProtocol == protocol,
+                            onClick = { openAiProtocol = protocol },
+                            label = { Text(protocol.label) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+                Text(
+                    if (openAiProtocol == com.hydrogen.ai.model.OpenAiProtocol.RESPONSES) {
+                        "Sends chats to /v1/responses. Use this only if the service documents that endpoint. " +
+                            "Model lists still come from /v1/models. Tools and web search are not used."
+                    } else {
+                        "Sends chats to /v1/chat/completions. This is the default and works with most services."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             val availableModes = reasoningOptions(preset.route, effectiveUrl, modelId, modelList.reasoningModelIds ?: relayConfig.openRouterReasoningModels)
             val supportsEffort = availableModes.size > 1

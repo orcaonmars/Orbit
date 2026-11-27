@@ -37,13 +37,22 @@ sealed interface RelayHealthResult {
     data class Failure(val error: ProviderError) : RelayHealthResult
 }
 
+/** Token counts a server reported for one reply. Null fields were not reported. */
+data class TokenUsage(
+    val inputTokens: Int? = null,
+    val outputTokens: Int? = null,
+    val reasoningTokens: Int? = null
+)
+
 sealed interface ChatDispatchResult {
     data class Success(
         val assistantText: String,
         val modelId: String,
         val turnMetadata: GeminiTurnMetadata? = null,
         val usedVision: Boolean = false,
-        val wasStreamed: Boolean = false
+        val wasStreamed: Boolean = false,
+        /** Only the Responses API reports this today; Chat Completions replies leave it null. */
+        val usage: TokenUsage? = null
     ) : ChatDispatchResult
 
     data class Failure(val error: ProviderError) : ChatDispatchResult

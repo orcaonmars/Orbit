@@ -11,12 +11,14 @@ data class ReplyRequestProfile(
     val requestedModel: String,
     val providerLabel: String,
     val reasoningMode: ReasoningMode,
-    val completionBudget: Int? = null
+    val completionBudget: Int? = null,
+    /** Which endpoint the reply came from. Defaults to Chat Completions for records saved before 0.3.5. */
+    val openAiProtocol: OpenAiProtocol = OpenAiProtocol.CHAT_COMPLETIONS
 ) {
     fun sameRequestTarget(other: ReplyRequestProfile): Boolean =
         route == other.route && endpointFingerprint == other.endpointFingerprint &&
             requestedModel == other.requestedModel && reasoningMode == other.reasoningMode &&
-            completionBudget == other.completionBudget
+            completionBudget == other.completionBudget && openAiProtocol == other.openAiProtocol
 
     /**
      * What was asked of the model beyond the defaults, as its own short line under the reply header; null when
@@ -36,7 +38,8 @@ data class ReplyRequestProfile(
             val provider = ProviderPresets.serviceNameFor(config.route, endpoint)
                 ?: if (config.route == ProviderRoute.LOCAL_OFFLINE) "Offline" else "Custom provider"
             return ReplyRequestProfile(config.route, fingerprint, config.modelId, provider,
-                config.reasoningMode, ReasoningPolicy.cleanApisBudget(endpoint, config.reasoningMode))
+                config.reasoningMode, ReasoningPolicy.cleanApisBudget(endpoint, config.reasoningMode),
+                openAiProtocol = config.openAiProtocol)
         }
     }
 }
