@@ -74,9 +74,10 @@ object ContextMeter {
         systemPrompt: String,
         route: ProviderRoute,
         draftChars: Int = 0,
-        draftImages: Int = 0
+        draftImages: Int = 0,
+        budgetChars: Int = ContextWindowTrimmer.budgetFor(route)
     ): ContextUsage {
-        val budget = ContextWindowTrimmer.budgetFor(route)
+        val budget = budgetChars
         val (system, turns) = messages.filter(::isSent).partition { it.role == MessageRole.SYSTEM }
         val reserved = systemPrompt.length.toLong() + system.sumOf { it.content.length.toLong() }
         val items = turns.map {

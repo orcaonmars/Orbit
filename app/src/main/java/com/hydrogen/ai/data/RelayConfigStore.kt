@@ -2,6 +2,7 @@ package com.hydrogen.ai.data
 
 import android.content.Context
 import com.hydrogen.ai.model.HydrogenDefaults
+import com.hydrogen.ai.model.ImageLimits
 import com.hydrogen.ai.model.ProviderRoute
 import com.hydrogen.ai.model.RelayConfig
 import java.util.concurrent.ConcurrentHashMap
@@ -166,7 +167,13 @@ class SharedPrefsRelayConfigStore(context: Context) : RelayConfigStore {
         val baseUrl = prefs.getString(KEY_BASE_URL, "") ?: ""
         val modelId = prefs.getString(KEY_MODEL_ID, defaultModel) ?: defaultModel
         val maxTokens = prefs.getInt(KEY_MAX_TOKENS, HydrogenDefaults.DEFAULT_CONTEXT_BUDGET_TOKENS)
-        val maxImages = prefs.getInt(KEY_MAX_IMAGES, HydrogenDefaults.DEFAULT_MAX_IMAGES_PER_REQUEST)
+        // Older builds always saved 8, their default, so a saved 8 there means "never changed": use automatic.
+        val maxImages = if (prefs.contains(KEY_MAX_IMAGES_V2)) {
+            prefs.getInt(KEY_MAX_IMAGES_V2, ImageLimits.AUTOMATIC)
+        } else {
+            prefs.getInt(KEY_MAX_IMAGES, ImageLimits.AUTOMATIC)
+                .takeIf { it != HydrogenDefaults.DEFAULT_MAX_IMAGES_PER_REQUEST } ?: ImageLimits.AUTOMATIC
+        }
         val streamingEnabled = prefs.getBoolean(KEY_STREAMING_ENABLED, true)
         val rememberInKeystore = prefs.getBoolean(KEY_REMEMBER_TOKEN, false)
         return RelayConfig(
@@ -174,7 +181,7 @@ class SharedPrefsRelayConfigStore(context: Context) : RelayConfigStore {
             baseUrl = baseUrl.trim().trimEnd('/'),
             modelId = modelId.trim().ifBlank { defaultModel },
             maxContextTokensBudget = maxTokens.coerceAtLeast(4_000),
-            maxImagesPerRequest = maxImages.coerceIn(1, 32),
+            maxImagesPerRequest = maxImages.coerceIn(0, ImageLimits.MAX_SETTING),
             streamingEnabled = streamingEnabled,
             rememberTokenInKeystore = rememberInKeystore,
             webSearchEnabled = prefs.getBoolean(KEY_WEB_SEARCH, false),
@@ -191,7 +198,7 @@ class SharedPrefsRelayConfigStore(context: Context) : RelayConfigStore {
             .putString(KEY_BASE_URL, config.baseUrl.trim().trimEnd('/'))
             .putString(KEY_MODEL_ID, config.modelId.trim())
             .putInt(KEY_MAX_TOKENS, config.maxContextTokensBudget.coerceAtLeast(4_000))
-            .putInt(KEY_MAX_IMAGES, config.maxImagesPerRequest.coerceIn(1, 32))
+            .putInt(KEY_MAX_IMAGES_V2, config.maxImagesPerRequest.coerceIn(0, ImageLimits.MAX_SETTING))
             .putBoolean(KEY_STREAMING_ENABLED, config.streamingEnabled)
             .putBoolean(KEY_REMEMBER_TOKEN, config.rememberTokenInKeystore)
             .putBoolean(KEY_WEB_SEARCH, config.webSearchEnabled)
@@ -207,6 +214,7 @@ class SharedPrefsRelayConfigStore(context: Context) : RelayConfigStore {
         private const val KEY_MODEL_ID = "model_id"
         private const val KEY_MAX_TOKENS = "max_context_tokens"
         private const val KEY_MAX_IMAGES = "max_images_per_request"
+        private const val KEY_MAX_IMAGES_V2 = "max_images_per_request_v2"
         private const val KEY_WEB_SEARCH = "web_search_enabled"
         private const val KEY_STREAMING_ENABLED ="streaming_enabled"
         private const val KEY_REMEMBER_TOKEN = "remember_token_keystore"

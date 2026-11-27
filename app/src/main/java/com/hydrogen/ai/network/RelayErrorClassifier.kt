@@ -27,6 +27,8 @@ object RelayErrorClassifier {
     const val LAYER_MODEL = "provider_model"
     const val LAYER_SIZE = "provider_size"
     const val LAYER_BUSY = "provider_busy"
+    const val LAYER_UPSTREAM_SHARED = "upstream_shared_limit"
+    const val LAYER_PLAN = "provider_plan"
     const val LAYER_KEY = "provider"
 
     /** Returns true if the error is transient and a retry is likely to succeed. */
@@ -142,6 +144,36 @@ object RelayErrorClassifier {
             return error(ProviderErrorCategory.OUT_OF_CREDITS, message, LAYER_BILLING)
         }
 
+        // OpenRouter passes on a 429 from the provider behind a model ("google/gemma-4-31b-it:free is temporarily
+        // rate-limited upstream", limit_source "upstream_provider_shared_pool"). That pool is shared by everyone using
+        // the model, so it says nothing about this key or account: another key hits the same wall.
+        if (looksUpstreamSharedThrottle(statusCode, bodyLower)) {
+            val tail = if (svc == "OpenRouter") {
+                " Try again shortly, or pick openrouter/free, which sends the chat to a free model that is available."
+            } else {
+                " Try again shortly, or pick another model."
+            }
+            return error(
+                ProviderErrorCategory.OVERLOADED,
+                "The provider behind this model is rate-limited right now. That limit is shared by everyone using " +
+                    "the model, so it is not your key or your quota.$tail",
+                LAYER_UPSTREAM_SHARED,
+                retryAfterSeconds
+            )
+        }
+
+        // Google answers a model the free tier does not include with a 429 whose quota "limit" is 0. Nothing was used
+        // up and no reset will fix it, so every free key fails the same way on that model.
+        if (statusCode == 429 && ZERO_QUOTA.containsMatchIn(bodyLower)) {
+            return error(
+                ProviderErrorCategory.FORBIDDEN_403,
+                "${svc ?: "The service"} gives this model no free quota on your plan (its limit is 0), so it is not " +
+                    "that your quota is used up. Pick a model the free tier includes, or turn on billing with " +
+                    "${svc ?: "the service"} yourself.",
+                LAYER_PLAN
+            )
+        }
+
         if (REGION_WORDS.any { bodyLower.contains(it) }) {
             return error(
                 ProviderErrorCategory.REGION_UNAVAILABLE,
@@ -167,6 +199,20 @@ object RelayErrorClassifier {
             return error(ProviderErrorCategory.BAD_REQUEST_400,
                 "The model or provider rejected this reasoning setting. Select Automatic in the composer or Models and providers, then retry.",
                 "provider_reasoning")
+        }
+
+        // OpenRouter: "No endpoints found matching your data policy" (or guardrail). The model exists, but the
+        // account's privacy settings rule out every provider that serves it, which free models often trip.
+        if (statusCode == 404 && bodyLower.contains("no endpoints") &&
+            (bodyLower.contains("data policy") || bodyLower.contains("guardrail"))
+        ) {
+            return error(
+                ProviderErrorCategory.MODEL_NOT_FOUND,
+                "${svc ?: "The service"} has no provider for this model that your account's privacy settings allow. " +
+                    "This is not a limit. Change the privacy or guardrail settings on the ${svc ?: "service"} " +
+                    "website, or pick another model.",
+                LAYER_MODEL
+            )
         }
 
         if (looksModelNotFound(statusCode, bodyLower, hosted = svc != null)) {
@@ -310,6 +356,16 @@ object RelayErrorClassifier {
         "authentication_error"
     )
 
+    /** "limit: 0" in a quota error, not "limit: 05" or "limit: 0.5". */
+    private val ZERO_QUOTA = Regex("""\blimit:\s*0(?![\d.])""")
+
+    private fun looksUpstreamSharedThrottle(status: Int, body: String): Boolean =
+        status == 429 && (
+            body.contains("rate-limited upstream") ||
+                body.contains("upstream_provider_shared_pool") ||
+                (body.contains("provider returned error") && body.contains("temporarily rate-limited"))
+            )
+
     private fun looksOutOfCredits(status: Int, body: String): Boolean {
         if (status == 402) return true
         if (body.contains("insufficient_quota") || body.contains("billing_error") ||
@@ -340,13 +396,15 @@ object RelayErrorClassifier {
         svc: String?
     ): ProviderError {
         // Generic RESOURCE_EXHAUSTED and free-tier labels do not specify a quota period.
+        // OpenRouter names its own free-model limits "free-models-per-day" and "free-models-per-min".
         val explicitRate = bodyLower.contains("per_minute") ||
             bodyLower.contains("perminute") || bodyLower.contains("per minute") ||
+            bodyLower.contains("per-minute") || bodyLower.contains("per-min") ||
             bodyLower.contains("per_second") || bodyLower.contains("persecond") ||
             bodyLower.contains("per second") ||
             Regex("""\b(rpm|tpm|rps)\b""").containsMatchIn(bodyLower)
         val explicitDaily = bodyLower.contains("per_day") ||
-            bodyLower.contains("perday") || bodyLower.contains("per day") ||
+            bodyLower.contains("perday") || bodyLower.contains("per day") || bodyLower.contains("per-day") ||
             Regex("""\bdaily[ _-]+(quota|limit|request|token|usage)""").containsMatchIn(bodyLower) ||
             Regex("""\b(rpd|tpd)\b""").containsMatchIn(bodyLower)
         val isDaily = explicitDaily && !explicitRate
@@ -369,7 +427,7 @@ object RelayErrorClassifier {
             val lead = if (isRate) {
                 if (svc != null) "Too many requests to $svc in a short time." else "Too many requests in a short time."
             } else {
-                "The service reports a quota or capacity limit, but has not confirmed that your daily allowance is exhausted."
+                "${svc ?: "The service"} is limiting requests right now. It has not confirmed that your quota is used up."
             }
             ProviderError(
                 category = ProviderErrorCategory.QUOTA_RATE_TPM_RPM_429,
@@ -403,7 +461,13 @@ object RelayErrorClassifier {
         val kind = listOf("type", "status", "code")
             .mapNotNull { (obj?.get(it) as? JsonPrimitive)?.contentOrNull }
             .firstOrNull { it.isNotBlank() && it != "null" }
-        return if (kind != null) "$kind: $message" else message
+        val headline = if (kind != null) "$kind: $message" else message
+        // OpenRouter's own message is often just "Provider returned error"; the provider's words are in metadata.
+        val metadata = obj?.get("metadata") as? JsonObject
+        val raw = (metadata?.get("raw") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+            ?: return headline
+        val provider = (metadata["provider_name"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        return "$headline (${provider?.let { "$it: " }.orEmpty()}$raw)"
     }
 
     fun parseRetryAfterSeconds(headerValue: String?): Int? {

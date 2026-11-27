@@ -9,15 +9,15 @@ package com.hydrogen.ai.model
 object WhatsNew {
     data class Item(val title: String, val body: String)
 
-    const val TITLE = "What's new in Orbit 0.3.2"
+    const val TITLE = "What's new in Orbit 0.3.3"
     const val SUBTITLE = "Your chats, notes and settings came with you."
     const val DONE = "Start chatting"
 
     val ITEMS: List<Item> = listOf(
-        Item("A clearer model switcher", "Recent and favorite models first, then one list per provider."),
-        Item("A calmer chat", "Replies no longer dim or jump when they finish, and new chats offer a few ideas to start."),
-        Item("Settings that fit", "Settings and About no longer sit under the navigation buttons."),
-        Item("Fixes", "Pairing with a PC no longer crashes on Android 8 to 12, and read aloud picks a better voice.")
+        Item("More photos per message", "Photos past a service's limit go into numbered grids instead of being left out."),
+        Item("Lighter photos", "Big camera photos are shrunk before sending instead of being turned away."),
+        Item("Clearer limit messages", "A busy free model no longer looks like every one of your keys ran out."),
+        Item("Fixes", "A missing photo from earlier in a chat no longer stops new messages from sending.")
     )
 
     /**

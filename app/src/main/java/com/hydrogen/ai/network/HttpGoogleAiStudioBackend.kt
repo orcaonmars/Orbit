@@ -228,8 +228,9 @@ class HttpGoogleAiStudioBackend(
         val systemTexts = mutableListOf<String>()
         val contents = mutableListOf<JsonObject>()
         var instructionsPlaced = false
+        val currentIndex = HistoryImages.newestUserIndex(request.messages)
 
-        for (msg in request.messages) {
+        for ((msgIndex, msg) in request.messages.withIndex()) {
             if (msg.role == MessageRole.SYSTEM) {
                 if (msg.content.isNotBlank()) systemTexts += msg.content
                 continue
@@ -271,6 +272,7 @@ class HttpGoogleAiStudioBackend(
                     parts += buildJsonObject { put("text", msg.content) }
                 }
                 val includedAtts = msg.attachments.filterNot { it.id in request.omittedAttachmentIds }
+                var leftOutPhoto = false
                 for (att in includedAtts) {
                     val loader = imageLoader ?: return PayloadBuildResult(
                         error = ProviderError(
@@ -293,17 +295,24 @@ class HttpGoogleAiStudioBackend(
                                 )
                             }
                         }
-                        is ImageLoadResult.MissingOrUnreadable -> return PayloadBuildResult(
-                            error = ProviderError(
-                                category = ProviderErrorCategory.BAD_REQUEST_400,
-                                userMessage = "\"${att.displayName}\" couldn't be read, so nothing was sent. Remove it " +
-                                    "or attach it again.",
-                                technicalDetail = loaded.reason,
-                                sourceLayer = "client"
+                        is ImageLoadResult.MissingOrUnreadable -> {
+                            if (msgIndex != currentIndex) {
+                                leftOutPhoto = true
+                                continue
+                            }
+                            return PayloadBuildResult(
+                                error = ProviderError(
+                                    category = ProviderErrorCategory.BAD_REQUEST_400,
+                                    userMessage = "\"${att.displayName}\" couldn't be read, so nothing was sent. Remove it " +
+                                        "or attach it again.",
+                                    technicalDetail = loaded.reason,
+                                    sourceLayer = "client"
+                                )
                             )
-                        )
+                        }
                     }
                 }
+                if (leftOutPhoto) parts += buildJsonObject { put("text", HistoryImages.LEFT_OUT_NOTE) }
             }
 
             if (parts.isNotEmpty()) {

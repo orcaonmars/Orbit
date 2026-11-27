@@ -119,7 +119,10 @@ class MainActivity : ComponentActivity() {
                         personalStore = com.hydrogen.ai.data.FilePersonalStore(filesDir),
                         projectStore = com.hydrogen.ai.data.FileProjectStore(filesDir),
                         appVersionStore = com.hydrogen.ai.data.SharedPrefsAppVersionStore(applicationContext),
-                        errorLogStore = com.hydrogen.ai.data.FileErrorLogStore(filesDir)
+                        errorLogStore = com.hydrogen.ai.data.FileErrorLogStore(filesDir),
+                        imageSheetComposer = com.hydrogen.ai.data.AndroidImageSheetComposer(
+                            applicationContext, File(cacheDir, "orbit_grids")
+                        )
                     )
                 )
                 // Not lifecycle-bound on purpose: it must see a reply finish while backgrounded.

@@ -124,9 +124,13 @@ class ChatViewModel(
     private val appVersionStore: AppVersionStore = InMemoryAppVersionStore(),
     private val currentVersionCode: Int = BuildConfig.VERSION_CODE,
     private val errorLogStore: ErrorLogStore = InMemoryErrorLogStore(),
+    /** Draws photos beyond the service's image limit into numbered grids; null sends only what fits. */
+    imageSheetComposer: com.hydrogen.ai.network.ImageSheetComposer? = null,
     // Keep the clock last: tests pass it as a trailing lambda.
     private val clock: () -> Long = { System.currentTimeMillis() }
 ) : ViewModel() {
+
+    private val imagePacker = com.hydrogen.ai.network.DispatchImagePacker(imageSheetComposer)
 
     /** Every save goes through this wrapper, so a temporary chat never reaches storage. */
     private val conversationStore: ConversationStore = SavedChatsOnly(conversationStore)
@@ -446,7 +450,7 @@ class ChatViewModel(
                 attachments = updated
             )
             val preflight = PreflightValidator.assess(preview, state.relayConfig)
-            state.copy(stagedAttachments = updated, preflightWarnings = preflight.warnings)
+            state.copy(stagedAttachments = updated, preflightWarnings = preflight.warningsWhileStaging)
         }
         if (!accepted) {
             val current = _uiState.value
@@ -504,7 +508,7 @@ class ChatViewModel(
                     createdAtEpochMs = clock(),
                     attachments = remainingStaged
                 )
-                PreflightValidator.assess(preview, state.relayConfig).warnings
+                PreflightValidator.assess(preview, state.relayConfig).warningsWhileStaging
             }
             state.copy(
                 stagedAttachments = remainingStaged,
@@ -1085,7 +1089,7 @@ class ChatViewModel(
             },
             modelId = modelId.trim().ifBlank { defaultModel },
             maxContextTokensBudget = maxContextTokens.coerceAtLeast(4_000),
-            maxImagesPerRequest = maxImages.coerceIn(1, 32),
+            maxImagesPerRequest = maxImages.coerceIn(0, com.hydrogen.ai.model.ImageLimits.MAX_SETTING),
             streamingEnabled = streamingEnabled,
             rememberTokenInKeystore = rememberTokenInKeystore,
             webSearchEnabled = webSearchEnabled,
@@ -2343,7 +2347,7 @@ class ChatViewModel(
                         },
                         stagedConversation,
                         preflight.omittedAttachmentIds,
-                        state.relayConfig.route
+                        state.relayConfig
                     ),
                     stagedConversation
                 )
@@ -2438,6 +2442,20 @@ class ChatViewModel(
         config: RelayConfig,
         onStreamDelta: suspend (StreamDelta) -> Unit
     ): ChatDispatchResult {
+        // Photos beyond the service's limit go into numbered grids for this request only.
+        val packed = imagePacker.pack(request, com.hydrogen.ai.model.ImageLimits.effectiveCap(config))
+        try {
+            return sendWithKeyRotation(packed.request, config, onStreamDelta)
+        } finally {
+            imagePacker.discard(packed)
+        }
+    }
+
+    private suspend fun sendWithKeyRotation(
+        request: ChatDispatchRequest,
+        config: RelayConfig,
+        onStreamDelta: suspend (StreamDelta) -> Unit
+    ): ChatDispatchResult {
         val main = credentialStore.getToken(config)
         val backups = if (main.isNullOrBlank()) emptyList() else credentialStore.getBackupTokens(config)
         val keys: List<String?> = listOf(main) + backups
@@ -2488,13 +2506,13 @@ class ChatViewModel(
         history: List<ChatMessage>,
         conversation: Conversation,
         omittedAttachmentIds: Collection<String>,
-        route: ProviderRoute
+        config: RelayConfig
     ): List<ChatMessage> = com.hydrogen.ai.model.ContextWindowTrimmer.trim(
         messages = history,
         // Budget for the whole system message, PC hint included, since withInstructions() sends all of it.
         systemPrompt = AskPcProposals.withSystemHint(instructionsFor(conversation), askPcHintEnabled(_uiState.value)),
         omittedAttachmentIds = omittedAttachmentIds,
-        budgetChars = com.hydrogen.ai.model.ContextWindowTrimmer.budgetFor(route)
+        budgetChars = com.hydrogen.ai.model.ContextWindowTrimmer.budgetFor(config)
     )
 
     fun retryMessage(messageId: String) {
@@ -2579,7 +2597,7 @@ class ChatViewModel(
                         },
                         stagedConversation,
                         preflight.omittedAttachmentIds,
-                        state.relayConfig.route
+                        state.relayConfig
                     ),
                     stagedConversation
                 )
@@ -2689,7 +2707,7 @@ class ChatViewModel(
                         },
                         stagedConversation,
                         preflight.omittedAttachmentIds,
-                        config.route
+                        config
                     ),
                     stagedConversation
                 )
@@ -3200,6 +3218,7 @@ class ChatViewModel(
         private val projectStore: ProjectStore = InMemoryProjectStore(),
         private val appVersionStore: AppVersionStore = InMemoryAppVersionStore(),
         private val errorLogStore: ErrorLogStore = InMemoryErrorLogStore(),
+        private val imageSheetComposer: com.hydrogen.ai.network.ImageSheetComposer? = null,
         private val clock: () -> Long = { System.currentTimeMillis() }
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
@@ -3219,7 +3238,8 @@ class ChatViewModel(
                     personalStore = personalStore,
                     projectStore = projectStore,
                     appVersionStore = appVersionStore,
-                    errorLogStore = errorLogStore
+                    errorLogStore = errorLogStore,
+                    imageSheetComposer = imageSheetComposer
                 ) as T
             }
             throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")

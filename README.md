@@ -9,6 +9,13 @@ pick a model, and talk. That's most of it.
 It's an alpha. The core stuff is solid and well tested, but it hasn't been on many phones yet, so expect a few rough
 edges.
 
+## What is new in 0.3.3-alpha
+
+- Each service's own photo limit per message; photos past it go into numbered grid images instead of being dropped.
+- Photos are scaled to 1568 px before sending, so large camera photos are no longer turned away.
+- A busy free OpenRouter model no longer looks like every saved key ran out, and other limit messages are clearer.
+- A photo from earlier in a chat that can no longer be read no longer blocks later messages.
+
 ## What is new in 0.3.2-alpha
 
 - A two-level model switcher: recent and favorite models first, then one list per provider.

@@ -677,7 +677,7 @@ fun ChatScreen(
                 var importedCount = 0
                 for (uri in chosen) {
                     val config = viewModel.uiState.value.relayConfig
-                    val remainingImages = config.maxImagesPerRequest -
+                    val remainingImages = com.hydrogen.ai.model.ImageLimits.effectiveCap(config) -
                         viewModel.stagedAttachmentCount(targetId)
                     when (val result = documentImporter.import(context, uri, remainingImages.coerceAtLeast(1))) {
                         is DocumentImportResult.Text -> {
@@ -2403,7 +2403,7 @@ private fun ChatScaffold(
             val activeMessages = state.activeConversation?.messages.orEmpty()
             val activeSystemPrompt = state.activeConversation?.systemPrompt.orEmpty()
             val contextUsage = remember(
-                activeMessages, activeSystemPrompt, state.relayConfig.route,
+                activeMessages, activeSystemPrompt, state.relayConfig,
                 state.draftText.length, state.stagedAttachments.size
             ) {
                 ContextMeter.measure(
@@ -2411,7 +2411,8 @@ private fun ChatScaffold(
                     systemPrompt = activeSystemPrompt,
                     route = state.relayConfig.route,
                     draftChars = state.draftText.length,
-                    draftImages = state.stagedAttachments.size
+                    draftImages = state.stagedAttachments.size,
+                    budgetChars = com.hydrogen.ai.model.ContextWindowTrimmer.budgetFor(state.relayConfig)
                 )
             }
             // Voice chat draws its own full-screen view on top, so the composer stays put underneath.
@@ -2421,7 +2422,7 @@ private fun ChatScaffold(
                 onStartVoiceChat = onStartVoiceChat,
                 dictation = dictation,
                 contextUsage = contextUsage,
-                maxImagesPerRequest = state.relayConfig.maxImagesPerRequest,
+                maxImagesPerRequest = com.hydrogen.ai.model.ImageLimits.effectiveCap(state.relayConfig),
                 draftText = state.draftText,
                 stagedAttachments = state.stagedAttachments,
                 isSending = state.isSending,
@@ -4096,10 +4097,13 @@ private fun ComposerBar(
                 }
             }
             if (overLimit) {
+                val plan = com.hydrogen.ai.model.ImageSheetPlanner.plan(stagedAttachments, maxImagesPerRequest)
                 Text(
-                    text = "${stagedAttachments.size} of $maxImagesPerRequest attachments",
+                    text = stagedOverLimitText(stagedAttachments.size, maxImagesPerRequest, plan.singles.size,
+                        plan.sheets.size, plan.dropped.size),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
+                    color = if (plan.dropped.isNotEmpty()) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 6.dp)
                 )
             }
@@ -4657,4 +4661,13 @@ private fun java.io.InputStream.readNBytesCompat(limit: Int): ByteArray {
         out.write(buffer, 0, read)
     }
     return out.toByteArray()
+}
+
+/** What happens to staged photos beyond the service's per-message limit. */
+internal fun stagedOverLimitText(total: Int, cap: Int, singles: Int, sheets: Int, dropped: Int): String {
+    if (cap <= 0) return "This connection can't take photos."
+    val grids = if (sheets == 1) "1 numbered grid" else "$sheets numbered grids"
+    val lead = "$total photos. This service takes $cap per message, so photos ${singles + 1} to " +
+        "${total - dropped} will go in $grids."
+    return if (dropped > 0) "$lead $dropped more won't fit. Remove some, or send them in another message." else lead
 }

@@ -12,7 +12,8 @@ object HydrogenDefaults {
     const val ANTHROPIC_BASE_URL = "https://api.anthropic.com"
     const val DEFAULT_CONTEXT_BUDGET_TOKENS = 120_000
     const val DEFAULT_MAX_IMAGES_PER_REQUEST = 8
-    const val DEFAULT_MAX_IMAGE_BYTES = 10L * 1024L * 1024L
+    /** Photos are shrunk before sending, so this only rules out files too big to read; it matches import. */
+    const val DEFAULT_MAX_IMAGE_BYTES = 20L * 1024L * 1024L
 }
 
 @Serializable
@@ -64,7 +65,8 @@ data class RelayConfig(
     val baseUrl: String = "",
     val modelId: String = HydrogenDefaults.PRIMARY_MODEL_ID,
     val maxContextTokensBudget: Int = HydrogenDefaults.DEFAULT_CONTEXT_BUDGET_TOKENS,
-    val maxImagesPerRequest: Int = HydrogenDefaults.DEFAULT_MAX_IMAGES_PER_REQUEST,
+    /** 0 means automatic: the provider's own limit from [ImageLimits]. */
+    val maxImagesPerRequest: Int = ImageLimits.AUTOMATIC,
     val maxImageBytes: Long = HydrogenDefaults.DEFAULT_MAX_IMAGE_BYTES,
     val streamingEnabled: Boolean = true,
     val rememberTokenInKeystore: Boolean = false,
@@ -101,7 +103,7 @@ data class RelayConfig(
             supportsToolUse = false,
             supportsThinking = true,
             maxContextTokens = maxContextTokensBudget,
-            maxImagesPerRequest = maxImagesPerRequest,
+            maxImagesPerRequest = ImageLimits.effectiveCap(this),
             sharedQuotaNote = "Limits and billing come from your account with this service. Orbit never pays for anything."
         )
         ProviderRoute.GEMINI_HYDROGEN_RELAY -> ProviderCapabilities(
@@ -111,7 +113,7 @@ data class RelayConfig(
             supportsToolUse = false,
             supportsThinking = true,
             maxContextTokens = maxContextTokensBudget,
-            maxImagesPerRequest = maxImagesPerRequest
+            maxImagesPerRequest = ImageLimits.effectiveCap(this)
         )
         ProviderRoute.GOOGLE_AI_STUDIO_DIRECT -> ProviderCapabilities(
             supportsText = true,
@@ -120,7 +122,7 @@ data class RelayConfig(
             supportsToolUse = true,
             supportsThinking = true,
             maxContextTokens = maxContextTokensBudget,
-            maxImagesPerRequest = maxImagesPerRequest
+            maxImagesPerRequest = ImageLimits.effectiveCap(this)
         )
         ProviderRoute.LOCAL_OFFLINE -> ProviderCapabilities(
             supportsText = false,

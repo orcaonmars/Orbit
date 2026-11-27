@@ -1,13 +1,10 @@
 package com.hydrogen.ai.data
 
 import android.content.Context
-import android.net.Uri
 import android.util.Base64
 import com.hydrogen.ai.model.HydrogenDefaults
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.io.InputStream
-import java.net.URI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
@@ -61,6 +58,10 @@ internal fun readAndEncodeImageStream(
     )
 }
 
+/**
+ * Loads a photo for sending. Large or sideways photos are shrunk to [ImageSendSizing.MAX_EDGE_PX] on their longest
+ * side and sent as JPEG; small compatible files go unchanged. The saved original is only read.
+ */
 class AndroidContentImagePayloadLoader(
     private val context: Context,
     private val maxBytes: Long = HydrogenDefaults.DEFAULT_MAX_IMAGE_BYTES
@@ -69,52 +70,40 @@ class AndroidContentImagePayloadLoader(
     override suspend fun loadImage(localUri: String, expectedMimeType: String): ImageLoadResult =
         withContext(Dispatchers.IO) {
             try {
-                val parsed = URI.create(localUri)
-                if (parsed.scheme == "file") {
-                    val resolvedMime = expectedMimeType.takeIf { it.startsWith("image/") }
-                        ?: return@withContext ImageLoadResult.MissingOrUnreadable(
-                            "Unsupported or unknown image MIME type."
-                        )
-                    val file = File(parsed)
-                    if (!file.exists() || !file.isFile) {
-                        return@withContext ImageLoadResult.MissingOrUnreadable(
-                            "Persisted attachment file missing: ${file.name}"
-                        )
-                    }
-                    return@withContext file.inputStream().use { input ->
-                        readAndEncodeImageStream(
-                            input = input,
-                            resolvedMime = resolvedMime,
-                            maxBytes = maxBytes,
-                            encodeBase64 = { Base64.encodeToString(it, Base64.NO_WRAP) }
-                        )
-                    }
+                val read = AndroidImageCodec.read(context, localUri, expectedMimeType, maxBytes)
+                val bytes = when (read) {
+                    is AndroidImageCodec.Read.Failed -> return@withContext ImageLoadResult.MissingOrUnreadable(read.reason)
+                    is AndroidImageCodec.Read.Bytes -> read
                 }
-
-                val uri = Uri.parse(localUri)
-                val resolvedMime = context.contentResolver.getType(uri)
-                    ?.takeIf { it.startsWith("image/") }
-                    ?: expectedMimeType.takeIf { it.startsWith("image/") }
-                    ?: return@withContext ImageLoadResult.MissingOrUnreadable(
-                        "Unsupported or unknown image MIME type."
-                    )
-                val stream = context.contentResolver.openInputStream(uri)
-                    ?: return@withContext ImageLoadResult.MissingOrUnreadable(
-                        "Cannot open attachment stream."
-                    )
-                stream.use { input ->
-                    readAndEncodeImageStream(
-                        input = input,
-                        resolvedMime = resolvedMime,
-                        maxBytes = maxBytes,
-                        encodeBase64 = { Base64.encodeToString(it, Base64.NO_WRAP) }
-                    )
+                val bounds = AndroidImageCodec.bounds(bytes.data)
+                val shrink = ImageSendSizing.needsReencode(
+                    bytes.data.size.toLong(), bounds.width, bounds.height, bytes.mimeType, bounds.rotatedOrFlipped
+                )
+                val shrunk = if (shrink) {
+                    AndroidImageCodec.decodeUpright(bytes.data, ImageSendSizing.MAX_EDGE_PX)?.let { bitmap ->
+                        try {
+                            AndroidImageCodec.encodeJpeg(bitmap)
+                        } finally {
+                            bitmap.recycle()
+                        }
+                    }
+                } else {
+                    null
                 }
+                val (data, mime) = if (shrunk != null && shrunk.isNotEmpty()) shrunk to "image/jpeg" else bytes.data to bytes.mimeType
+                ImageLoadResult.Success(
+                    EncodedImagePayload(
+                        mimeType = mime,
+                        base64Data = Base64.encodeToString(data, Base64.NO_WRAP),
+                        sizeBytes = data.size.toLong()
+                    )
+                )
             } catch (e: CancellationException) {
                 throw e
+            } catch (_: OutOfMemoryError) {
+                ImageLoadResult.MissingOrUnreadable("Not enough memory to prepare this photo.")
             } catch (_: Exception) {
                 ImageLoadResult.MissingOrUnreadable("Failed to read attachment.")
             }
         }
 }
-

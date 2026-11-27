@@ -154,7 +154,9 @@ fun RelaySettingsSheet(
         )
     }
     var maxContextText by remember(relayConfig) { mutableStateOf(relayConfig.maxContextTokensBudget.toString()) }
-    var maxImagesText by remember(relayConfig) { mutableStateOf(relayConfig.maxImagesPerRequest.toString()) }
+    var maxImagesText by remember(relayConfig) { mutableStateOf(
+        relayConfig.maxImagesPerRequest.takeIf { it > 0 }?.toString().orEmpty()
+    ) }
     var streamingEnabled by remember(relayConfig) { mutableStateOf(relayConfig.streamingEnabled) }
     var rememberKey by remember(relayConfig) { mutableStateOf(relayConfig.rememberTokenInKeystore || !relayConfig.isConfigured) }
     var webSearch by remember(relayConfig) { mutableStateOf(relayConfig.webSearchEnabled) }
@@ -224,9 +226,13 @@ fun RelaySettingsSheet(
             return false
         }
         val contextTokens = maxContextText.toIntOrNull()
-        val imageLimit = maxImagesText.toIntOrNull()
-        if (contextTokens == null || contextTokens <= 0 || imageLimit == null || imageLimit <= 0) {
-            validationError = "Advanced: enter positive numbers for context tokens and max images."
+        // Empty means automatic: the provider's own image limit.
+        val imageLimit = if (maxImagesText.isBlank()) com.hydrogen.ai.model.ImageLimits.AUTOMATIC else maxImagesText.toIntOrNull()
+        if (contextTokens == null || contextTokens <= 0 || imageLimit == null || imageLimit < 0 ||
+            imageLimit > com.hydrogen.ai.model.ImageLimits.MAX_SETTING
+        ) {
+            validationError = "Advanced: enter a positive number for context tokens, and 0 to " +
+                "${com.hydrogen.ai.model.ImageLimits.MAX_SETTING} for max images."
             showAdvanced = true
             return false
         }
@@ -681,6 +687,10 @@ fun RelaySettingsSheet(
                     value = maxImagesText,
                     onValueChange = { maxImagesText = it.filter(Char::isDigit) },
                     label = { Text("Maximum images per request") },
+                    placeholder = { Text("Automatic") },
+                    supportingText = {
+                        Text("Leave empty to use the provider's own limit. Extra photos are combined into numbered grids.")
+                    },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()

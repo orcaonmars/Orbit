@@ -417,24 +417,26 @@ class ChatViewModelPersistenceAndRetryTest {
             vm.addStagedAttachment(a2)
             assertTrue(vm.uiState.value.preflightWarnings.isEmpty())
 
+            // Over the limit while staged: the tray explains it next to the photos, so no top notice repeats it.
             vm.addStagedAttachment(a3)
             vm.addStagedAttachment(a4)
-            assertEquals(1, vm.uiState.value.preflightWarnings.size)
+            assertTrue(vm.uiState.value.preflightWarnings.isEmpty())
 
             vm.removeStagedAttachment("a4")
             assertEquals(3, vm.uiState.value.stagedAttachments.size)
-            assertEquals(1, vm.uiState.value.preflightWarnings.size)
+            assertTrue(vm.uiState.value.preflightWarnings.isEmpty())
 
             vm.updateDraft("Check three images")
             vm.sendMessage()
             advanceUntilIdle()
+            // Once sent, the tray is gone and the notice says what happened to the photos.
+            assertEquals(1, vm.uiState.value.preflightWarnings.size)
 
-            assertEquals(listOf("a2", "a3"), dispatchedAttachmentIds)
+            // Without a grid composer only what fits is sent, but the chat keeps all three unmarked originals.
+            assertEquals(listOf("a1", "a2"), dispatchedAttachmentIds)
             val userAttachments = vm.uiState.value.activeConversation!!.messages.first().attachments
             assertEquals(3, userAttachments.size)
-            assertTrue(userAttachments[0].omittedFromRemote)
-            assertFalse(userAttachments[1].omittedFromRemote)
-            assertFalse(userAttachments[2].omittedFromRemote)
+            assertFalse(userAttachments.any { it.omittedFromRemote })
         } finally {
             tempDir.deleteRecursively()
         }

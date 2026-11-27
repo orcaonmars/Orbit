@@ -247,13 +247,15 @@ class HttpAnthropicMessagesBackend(
         val systemTexts = mutableListOf<String>()
         val turns = mutableListOf<Pair<String, MutableList<JsonObject>>>()
 
-        for (msg in request.messages) {
+        val currentIndex = HistoryImages.newestUserIndex(request.messages)
+        for ((msgIndex, msg) in request.messages.withIndex()) {
             if (msg.role == MessageRole.SYSTEM) {
                 if (msg.content.isNotBlank()) systemTexts += msg.content
                 continue
             }
             val role = if (msg.role == MessageRole.USER) "user" else "assistant"
             val blocks = mutableListOf<JsonObject>()
+            var leftOutPhoto = false
             if (msg.role == MessageRole.USER) {
                 for (att in msg.attachments.filterNot { it.id in request.omittedAttachmentIds }) {
                     val loader = imageLoader ?: return PayloadBuildResult(
@@ -261,7 +263,12 @@ class HttpAnthropicMessagesBackend(
                     )
                     when (val loaded = loader.loadImage(att.localUri, att.mimeType)) {
                         is ImageLoadResult.Success -> {
-                            val mime = normalizeImageType(loaded.payload.mimeType) ?: return PayloadBuildResult(
+                            val mime = normalizeImageType(loaded.payload.mimeType)
+                            if (mime == null && msgIndex != currentIndex) {
+                                leftOutPhoto = true
+                                continue
+                            }
+                            mime ?: return PayloadBuildResult(
                                 error = attachmentError(
                                     "\"${att.displayName}\" is a kind of image this model can't read. Use a JPEG, PNG, GIF or WebP image.",
                                     "unsupported image type ${loaded.payload.mimeType}"
@@ -277,12 +284,18 @@ class HttpAnthropicMessagesBackend(
                                 })
                             }
                         }
-                        is ImageLoadResult.MissingOrUnreadable -> return PayloadBuildResult(
-                            error = attachmentError(
-                                "\"${att.displayName}\" couldn't be read, so nothing was sent. Remove it or attach it again.",
-                                loaded.reason
+                        is ImageLoadResult.MissingOrUnreadable -> {
+                            if (msgIndex != currentIndex) {
+                                leftOutPhoto = true
+                                continue
+                            }
+                            return PayloadBuildResult(
+                                error = attachmentError(
+                                    "\"${att.displayName}\" couldn't be read, so nothing was sent. Remove it or attach it again.",
+                                    loaded.reason
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
@@ -290,6 +303,12 @@ class HttpAnthropicMessagesBackend(
                 blocks += buildJsonObject {
                     put("type", "text")
                     put("text", if (msg.role == MessageRole.ASSISTANT) msg.content.trimEnd() else msg.content)
+                }
+            }
+            if (leftOutPhoto) {
+                blocks += buildJsonObject {
+                    put("type", "text")
+                    put("text", HistoryImages.LEFT_OUT_NOTE)
                 }
             }
             if (blocks.isEmpty()) continue

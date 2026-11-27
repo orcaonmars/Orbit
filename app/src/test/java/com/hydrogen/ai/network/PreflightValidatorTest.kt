@@ -31,21 +31,50 @@ class PreflightValidatorTest {
             attachments = attachments
         )
 
-    @Test fun oldImagesAreMarkedOmittedButLocalOriginalsAreUnchanged() {
+    @Test fun theSentMessageKeepsAllItsPhotosAndExplainsTheGrids() {
         val originals = (1..10).map(::image)
         val result = PreflightValidator.assess(
             listOf(msg("What is this?", originals)),
             RelayConfig(maxImagesPerRequest = 8)
         )
         assertEquals(10, result.totalImageCount)
-        assertEquals(8, result.includedImages.size)
-        assertEquals(2, result.omittedImages.size)
-        assertEquals("image-3", result.includedImages.first().id)
+        assertEquals(10, result.includedImages.size)
+        assertTrue(result.omittedImages.isEmpty())
+        assertTrue(result.warnings.single().contains("numbered grid"))
+        // While the photos are still staged the tray says this next to them, so the top notice leaves it out.
+        assertEquals(result.warnings.single(), result.currentPhotosNote)
+        assertTrue(result.warningsWhileStaging.isEmpty())
+        assertFalse(result.warnings.single().contains("older"))
+        assertFalse(originals.any { it.omittedFromRemote })
+    }
+
+    @Test fun earlierPhotosAreOmittedOldestFirstButLocalOriginalsAreUnchanged() {
+        val earlier = (1..5).map(::image)
+        val current = (6..11).map(::image)
+        val history = listOf(
+            msg("First", earlier),
+            msg("Reply", emptyList()).copy(id = "message-2", role = MessageRole.ASSISTANT),
+            msg("Now these", current).copy(id = "message-3")
+        )
+        val result = PreflightValidator.assess(history, RelayConfig(maxImagesPerRequest = 8))
+        assertEquals(11, result.totalImageCount)
+        assertEquals(setOf("image-1", "image-2", "image-3"), result.omittedAttachmentIds)
+        assertEquals(listOf("image-4", "image-5") + current.map { it.id }, result.includedImages.map { it.id })
         assertTrue(result.omittedImages.all { it.omittedFromRemote })
         assertTrue(result.warnings.single().contains("not be sent remotely"))
-        assertEquals(setOf("image-1", "image-2"), result.omittedAttachmentIds)
-        assertFalse(originals.any { it.omittedFromRemote })
-        assertEquals("content://test/1", originals.first().localUri)
+        assertFalse(earlier.any { it.omittedFromRemote })
+        assertEquals("content://test/1", earlier.first().localUri)
+    }
+
+    @Test fun aLargeSentMessageOmitsEveryEarlierPhoto() {
+        val history = listOf(
+            msg("First", (1..3).map(::image)),
+            msg("Now these", (4..15).map(::image)).copy(id = "message-3")
+        )
+        val result = PreflightValidator.assess(history, RelayConfig(maxImagesPerRequest = 8))
+        assertEquals(setOf("image-1", "image-2", "image-3"), result.omittedAttachmentIds)
+        assertEquals(12, result.includedImages.size)
+        assertEquals(2, result.warnings.size)
     }
 
     @Test fun oversizedContextIsBlockedBeforeSending() {

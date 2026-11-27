@@ -271,7 +271,8 @@ class HttpGeminiHydrogenRelayBackend(
     ): PayloadBuildResult {
         var usedVision = false
         val messagesJson = mutableListOf<JsonObject>()
-        for (msg in request.messages) {
+        val currentIndex = HistoryImages.newestUserIndex(request.messages)
+        for ((msgIndex, msg) in request.messages.withIndex()) {
             val roleStr = when (msg.role) {
                 MessageRole.USER -> "user"
                 MessageRole.ASSISTANT -> "assistant"
@@ -291,6 +292,7 @@ class HttpGeminiHydrogenRelayBackend(
                         put("text", msg.content)
                     }
                 }
+                var leftOutPhoto = false
                 for (att in includedAtts) {
                     val loader = imageLoader ?: return PayloadBuildResult(
                         error = ProviderError(
@@ -309,15 +311,27 @@ class HttpGeminiHydrogenRelayBackend(
                                 put("image_url", buildJsonObject { put("url", dataUrl) })
                             }
                         }
-                        is ImageLoadResult.MissingOrUnreadable -> return PayloadBuildResult(
-                            error = ProviderError(
-                                category = ProviderErrorCategory.BAD_REQUEST_400,
-                                userMessage = "\"${att.displayName}\" couldn't be read, so nothing was sent. Remove it " +
-                                    "or attach it again.",
-                                technicalDetail = loaded.reason,
-                                sourceLayer = "client"
+                        is ImageLoadResult.MissingOrUnreadable -> {
+                            if (msgIndex != currentIndex) {
+                                leftOutPhoto = true
+                                continue
+                            }
+                            return PayloadBuildResult(
+                                error = ProviderError(
+                                    category = ProviderErrorCategory.BAD_REQUEST_400,
+                                    userMessage = "\"${att.displayName}\" couldn't be read, so nothing was sent. Remove it " +
+                                        "or attach it again.",
+                                    technicalDetail = loaded.reason,
+                                    sourceLayer = "client"
+                                )
                             )
-                        )
+                        }
+                    }
+                }
+                if (leftOutPhoto) {
+                    parts += buildJsonObject {
+                        put("type", "text")
+                        put("text", HistoryImages.LEFT_OUT_NOTE)
                     }
                 }
                 messagesJson += buildJsonObject {

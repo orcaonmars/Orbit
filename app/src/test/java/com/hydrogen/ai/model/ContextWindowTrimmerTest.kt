@@ -61,6 +61,30 @@ class ContextWindowTrimmerTest {
         assertEquals(ContextWindowTrimmer.LARGE_CONTEXT_BUDGET_CHARS, ContextWindowTrimmer.budgetFor(ProviderRoute.GOOGLE_AI_STUDIO_DIRECT))
         assertEquals(ContextWindowPolicy.DEFAULT_BUDGET_CHARS, ContextWindowTrimmer.budgetFor(ProviderRoute.GEMINI_HYDROGEN_RELAY))
     }
+
+    @Test
+    fun hostedServicesKeepHistoryWhenAMessageCarriesManyPhotos() {
+        fun relay(url: String) = RelayConfig(route = ProviderRoute.GEMINI_HYDROGEN_RELAY, baseUrl = url)
+        val openRouter = ContextWindowTrimmer.budgetFor(relay("https://openrouter.ai/api/v1"))
+        assertEquals(ContextWindowTrimmer.HOSTED_CONTEXT_BUDGET_CHARS, openRouter)
+        assertEquals(ContextWindowPolicy.DEFAULT_BUDGET_CHARS, ContextWindowTrimmer.budgetFor(relay("http://10.0.2.2:1234/v1")))
+        assertEquals(ContextWindowPolicy.DEFAULT_BUDGET_CHARS, ContextWindowTrimmer.budgetFor(relay("https://notopenai.com/v1")))
+        assertEquals(
+            ContextWindowTrimmer.LARGE_CONTEXT_BUDGET_CHARS,
+            ContextWindowTrimmer.budgetFor(RelayConfig(route = ProviderRoute.GOOGLE_AI_STUDIO_DIRECT))
+        )
+        // Ten photos used to cost more than the whole 24k default, so every earlier turn was dropped.
+        val history = listOf(
+            msg("u1", MessageRole.USER, 2000),
+            msg("a1", MessageRole.ASSISTANT, 4000),
+            msg("u2", MessageRole.USER, 200, images = 10)
+        )
+        assertSame(history, ContextWindowTrimmer.trim(history, "", emptySet(), openRouter))
+        assertEquals(
+            listOf("u2"),
+            ContextWindowTrimmer.trim(history, "", emptySet(), ContextWindowPolicy.DEFAULT_BUDGET_CHARS).map { it.id }
+        )
+    }
     @Test
     fun trimmingPreservesPositionOfRetainedSystemInstructions() {
         val history = listOf(
